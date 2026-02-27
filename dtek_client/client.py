@@ -104,15 +104,21 @@ class DtekClient:
 
     async def get_streets(self, city: str) -> list[dict[str, Any]]:
         """Fetch streets for a given city. Returns raw dicts."""
-        data = {"data[city]": city}
+        # Використовуємо формат jQuery serializeArray, який очікує сервер
+        data = {
+            "data[0][name]": "city",
+            "data[0][value]": city,
+        }
         response = await self._request(METHOD_GET_STREETS, data)
-        # Assuming the API returns a list directly or inside a "data" key.
         return response.get("data", response) if isinstance(response, dict) else response
 
     async def get_home_num(self, city: str, street: str) -> dict[str, Any]:
         """Fetch house numbers and schedule for a street. Returns raw dict."""
+        # Використовуємо формат jQuery serializeArray
         data = {
-            "data[city]": city,
-            "data[street]": street,
+            "data[0][name]": "city",
+            "data[0][value]": city,
+            "data[1][name]": "street",
+            "data[1][value]": street,
         }
         return await self._request(METHOD_GET_HOME_NUM, data)
