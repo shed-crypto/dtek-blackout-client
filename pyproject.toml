@@ -1,0 +1,15 @@
+[project]
+name = "dtek-blackout-client"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Rachenko",email = "alexey.rachenko@gmail.com"}
+]
+requires-python = ">=3.11"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
