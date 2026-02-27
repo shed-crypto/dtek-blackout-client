@@ -11,3 +11,12 @@ class DtekTimeoutError(DtekClientError):
 
 class DtekAPIError(DtekClientError):
     """Raised when the API returns an error HTTP status."""
+
+class DtekUnauthorizedError(DtekAPIError):
+    """Raised when the site returns 401/403 (WAF block or missing cookies)."""
+
+class DtekRateLimitError(DtekAPIError):
+    """Raised when hitting Cloudflare rate limits (429)."""
+
+class DtekSiteError(DtekClientError):
+    """Raised when the site structure changes (e.g. missing meta tags)."""
