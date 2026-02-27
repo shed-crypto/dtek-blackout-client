@@ -104,7 +104,6 @@ class DtekClient:
 
     async def get_streets(self, city: str) -> list[dict[str, Any]]:
         """Fetch streets for a given city. Returns raw dicts."""
-        # Використовуємо формат jQuery serializeArray, який очікує сервер
         data = {
             "data[0][name]": "city",
             "data[0][value]": city,
@@ -114,7 +113,6 @@ class DtekClient:
 
     async def get_home_num(self, city: str, street: str) -> dict[str, Any]:
         """Fetch house numbers and schedule for a street. Returns raw dict."""
-        # Використовуємо формат jQuery serializeArray
         data = {
             "data[0][name]": "city",
             "data[0][value]": city,
