@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class _FrozenModel(BaseModel):
@@ -47,6 +47,42 @@ class SlotStatus(str, Enum):
         )
 
 
+# ── Weekly planned schedule (preset.data) ─────────────────────────────────────
+
+class WeekDaySchedule(_FrozenModel):
+    """Schedule for one disconnection group on one day of the week."""
+
+    slots: dict[str, SlotStatus] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_slots(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        return {
+            "slots": {
+                k: SlotStatus(v)
+                for k, v in data.items()
+                if isinstance(v, str)
+            }
+        }
+
+    @property
+    def outage_slot_count(self) -> int:
+        return sum(1 for s in self.slots.values() if s.has_outage)
+
+    @property
+    def has_any_outage(self) -> bool:
+        return self.outage_slot_count > 0
+
+class GroupWeekSchedule(_FrozenModel):
+    group_id: str
+    days: dict[int, WeekDaySchedule] = Field(default_factory=dict)
+
+    def get_day(self, dtek_weekday: int) -> WeekDaySchedule | None:
+        """Return the schedule for a given DTEK weekday (1–7)."""
+        return self.days.get(dtek_weekday)
+    
 # ── Address lookup result ─────────────────────────────────────────────────────
 
 class AddressResult(_FrozenModel):
