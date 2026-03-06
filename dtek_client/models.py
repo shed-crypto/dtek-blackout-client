@@ -220,6 +220,109 @@ class FactSchedule(_FrozenModel):
         """Return the slot map for a specific day (by unix timestamp) and group."""
         return self.days.get(str(ts), {}).get(group_id)
     
+
+# ── House entry (from getHomeNum response) ────────────────────────────────────
+
+class HouseEntry(_FrozenModel):
+    """One house from the ``getHomeNum`` AJAX response.
+    """
+
+    house_number: str
+    group_ids: list[str] = Field(default_factory=list)
+    sub_type: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    outage_type: str = Field(default="", alias="type")
+    voluntarily: bool | None = None
+
+    @property
+    def is_multi_group(self) -> bool:
+        """True if this address belongs to more than one disconnection group."""
+        return len(self.group_ids) > 1
+
+    @property
+    def is_excluded(self) -> bool:
+        """True if this address is not in any outage group."""
+        return len(self.group_ids) == 0
+
+    @property
+    def primary_group(self) -> str | None:
+        """Return the first group_id, or None if excluded."""
+        return self.group_ids[0] if self.group_ids else None
+
+    @property
+    def has_current_outage(self) -> bool:
+        """True if the site reports a current (non-scheduled) outage for this address."""
+        return bool(self.sub_type) or bool(self.start_date)
+
+    def __str__(self) -> str:
+        if self.is_excluded:
+            return f"{self.house_number} → (not in schedule)"
+        if self.is_multi_group:
+            return f"{self.house_number} → groups: {', '.join(self.group_ids)}"
+        return f"{self.house_number} → group: {self.primary_group}"
+
+
+# ── Full getHomeNum response ───────────────────────────────────────────────────
+
+class HomeNumResponse(_FrozenModel):
+    """Full parsed response from the ``getHomeNum`` AJAX call.
+    """
+
+    houses: dict[str, HouseEntry] = Field(default_factory=dict)
+    preset: PresetSchedule | None = None
+    fact: FactSchedule | None = None
+    show_cur_schedule: bool = Field(default=False, alias="showCurSchedule")
+    show_table_plan: bool = Field(default=False, alias="showTablePlan")
+    show_table_fact: bool = Field(default=False, alias="showTableFact")
+    show_table_schedule: bool = Field(default=False, alias="showTableSchedule")
+    update_timestamp: str | None = Field(default=None, alias="updateTimestamp")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_response(cls, data: Any) -> Any:
+        """Parse the raw AJAX dict into typed houses, preset and fact."""
+        if not isinstance(data, dict):
+            return data
+
+        raw_data: dict = data.get("data", {})
+        houses: dict[str, HouseEntry] = {}
+        for house_num, entry in raw_data.items():
+            if not isinstance(entry, dict):
+                continue
+            houses[house_num] = HouseEntry(
+                house_number=house_num,
+                group_ids=entry.get("sub_type_reason", []),
+                sub_type=entry.get("sub_type", ""),
+                start_date=entry.get("start_date", ""),
+                end_date=entry.get("end_date", ""),
+                type=entry.get("type", ""),
+                voluntarily=entry.get("voluntarily"),
+            )
+
+        result = dict(data)
+        result["houses"] = houses
+
+        # Parse preset and fact if present in the raw dict.
+        if "preset" in data and isinstance(data["preset"], dict):
+            result["preset"] = PresetSchedule.model_validate(data["preset"])
+        if "fact" in data and isinstance(data["fact"], dict):
+            result["fact"] = FactSchedule.model_validate(data["fact"])
+
+        return result
+
+    def get_group_for_house(self, house_number: str) -> str | None:
+        """Return the primary group_id for a house number, or None."""
+        entry = self.houses.get(house_number)
+        if entry is None:
+            return None
+        return entry.primary_group
+
+    @property
+    def available_houses(self) -> list[str]:
+        """Sorted list of all house numbers in this response."""
+        return sorted(self.houses.keys())
+
 # ── Address lookup result ─────────────────────────────────────────────────────
 
 class AddressResult(_FrozenModel):
