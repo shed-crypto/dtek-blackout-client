@@ -1,6 +1,7 @@
 """Pydantic models for dtek-blackout-client."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -146,7 +147,78 @@ class PresetSchedule(_FrozenModel):
         """Sorted list of group IDs present in this schedule."""
         return sorted(self.groups.keys())
     
+# ── Actual (fact) schedule ────────────────────────────────────────────────────
 
+class FactDaySchedule(_FrozenModel):
+    """Actual confirmed schedule for one group on one specific calendar day.
+    """
+
+    group_id: str
+    day_ts: int  # Unix timestamp of the day (midnight Kyiv time)
+    slots: dict[str, SlotStatus] = Field(default_factory=dict)
+
+    @property
+    def outage_slot_count(self) -> int:
+        """Number of slots with a definite outage."""
+        return sum(1 for s in self.slots.values() if s.has_outage)
+
+    @property
+    def has_any_outage(self) -> bool:
+        """True if at least one slot has a definite outage."""
+        return self.outage_slot_count > 0
+
+    @property
+    def day_date(self) -> datetime:
+        """Return the day as a UTC datetime."""
+        return datetime.fromtimestamp(self.day_ts, tz=timezone.utc)
+
+
+class FactSchedule(_FrozenModel):
+    """Confirmed actual schedule for today (and possibly tomorrow) from ``fact``.
+    """
+
+    today_ts: int
+    update: str | None = None
+    # Structure: {ts_str: {group_id: {tz_key: SlotStatus}}}
+    days: dict[str, dict[str, dict[str, SlotStatus]]] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_fact(cls, data: Any) -> Any:
+        """Parse the raw AJAX fact dict into structured model fields."""
+        if not isinstance(data, dict):
+            return data
+
+        raw_data: dict = data.get("data", {})
+        days: dict[str, dict[str, dict[str, SlotStatus]]] = {}
+
+        for ts_str, group_map in raw_data.items():
+            if not isinstance(group_map, dict):
+                continue
+            day_entry: dict[str, dict[str, SlotStatus]] = {}
+            for group_id, slot_map in group_map.items():
+                if not isinstance(slot_map, dict):
+                    continue
+                day_entry[group_id] = {k: SlotStatus(v) for k, v in slot_map.items()}
+            days[ts_str] = day_entry
+
+        return {
+            "today_ts": int(data.get("today", 0)),
+            "update": data.get("update"),
+            "days": days,
+        }
+
+    def get_group_today(self, group_id: str) -> dict[str, SlotStatus] | None:
+        """Return today's slot map for a group, or None if unavailable."""
+        ts_str = str(self.today_ts)
+        day = self.days.get(ts_str)
+        if day is None:
+            return None
+        return day.get(group_id)
+
+    def get_group_day(self, ts: int, group_id: str) -> dict[str, SlotStatus] | None:
+        """Return the slot map for a specific day (by unix timestamp) and group."""
+        return self.days.get(str(ts), {}).get(group_id)
     
 # ── Address lookup result ─────────────────────────────────────────────────────
 
