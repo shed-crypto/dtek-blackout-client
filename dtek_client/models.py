@@ -323,6 +323,15 @@ class HomeNumResponse(_FrozenModel):
         """Sorted list of all house numbers in this response."""
         return sorted(self.houses.keys())
 
+# ── Street suggestion ─────────────────────────────────────────────────────────
+
+class StreetSuggestion(_FrozenModel):
+
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
+
 # ── Address lookup result ─────────────────────────────────────────────────────
 
 class AddressResult(_FrozenModel):

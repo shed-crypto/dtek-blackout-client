@@ -5,7 +5,6 @@ from typing import Any
 
 import aiohttp
 
-# Імпортуємо саме функцію, яка є у файлі
 from .browser_auth import get_cleared_cookies
 from .const import DTEK_SITES, DEFAULT_TIMEOUT, METHOD_GET_STREETS, METHOD_GET_HOME_NUM
 from .exceptions import (
@@ -15,6 +14,7 @@ from .exceptions import (
     DtekUnauthorizedError,
     DtekRateLimitError
 )
+from .models import StreetSuggestion, HomeNumResponse
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,14 +102,38 @@ class DtekClient:
             _LOGGER.error("Request failed: %s", e)
             raise
 
-    async def get_streets(self, city: str) -> list[dict[str, Any]]:
-        """Fetch streets for a given city. Returns raw dicts."""
+    async def get_streets(self, city: str) -> list[StreetSuggestion]:
+        """Fetch streets for a given city and return a list of StreetSuggestion objects."""
+        # Використовуємо формат jQuery serializeArray
         data = {
             "data[0][name]": "city",
             "data[0][value]": city,
         }
         response = await self._request(METHOD_GET_STREETS, data)
-        return response.get("data", response) if isinstance(response, dict) else response
+
+        # Обробляємо різні формати відповіді (список або словник)
+        raw_streets = []
+        if isinstance(response, dict):
+            # Витягуємо дані з ключа 'streets' або 'data'
+            raw_data = response.get("streets", response.get("data", {}))
+            if isinstance(raw_data, dict):
+                # Якщо прийшов словник списків, розгортаємо його в один список
+                for group in raw_data.values():
+                    if isinstance(group, list):
+                        raw_streets.extend(group)
+                    else:
+                        raw_streets.append(group)
+            elif isinstance(raw_data, list):
+                # Якщо прийшов список списків
+                for item in raw_data:
+                    if isinstance(item, list):
+                        raw_streets.extend(item)
+                    else:
+                        raw_streets.append(item)
+
+        # Перетворюємо назви вулиць (рядки) на об'єкти StreetSuggestion і прибираємо дублікати
+        unique_names = sorted(list(set(str(s) for s in raw_streets if s)))
+        return [StreetSuggestion(name=name) for name in unique_names]
 
     async def get_home_num(self, city: str, street: str) -> dict[str, Any]:
         """Fetch house numbers and schedule for a street. Returns raw dict."""

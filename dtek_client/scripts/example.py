@@ -18,17 +18,15 @@ async def main() -> None:
         test_street = "вул. Хрещатик"
         
         print(f"\n[1] Запит get_streets для '{city_name}':")
-        streets_raw = await client.get_streets(city_name)
+        streets = await client.get_streets(city_name)
         
-        # Парсимо вулиці (ДТЕК може повернути список або словник)
-        if isinstance(streets_raw, dict):
-            streets_data = streets_raw.get("data") or streets_raw.get("streets") or []
-            streets_list = list(streets_data.values()) if isinstance(streets_data, dict) else streets_data
-            print(f"Знайдено вулиць: {len(streets_list)}. Перші 5:")
-            pprint.pprint(streets_list[:5])
-        elif isinstance(streets_raw, list):
-            print(f"Знайдено вулиць: {len(streets_raw)}. Перші 5:")
-            pprint.pprint(streets_raw[:5])
+        if streets:
+            print(f"Успіх! Знайдено унікальних вулиць: {len(streets)}")
+            print("Перші 5 вулиць (вивід через об'єкти):")
+            for s in streets[:5]:
+                print(f"  • {s.name}") # Звертаємося до атрибута .name
+        else:
+            print("Вулиць не знайдено.")
 
         print(f"\n[2] Запит get_home_num для '{test_street}':")
         try:
