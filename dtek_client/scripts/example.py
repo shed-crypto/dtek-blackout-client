@@ -30,26 +30,24 @@ async def main() -> None:
 
         print(f"\n[2] Запит get_home_num для '{test_street}':")
         try:
-            home_num_raw = await client.get_home_num(city_name, test_street)
+            # Тепер тут повноцінний об'єкт HomeNumResponse
+            response = await client.get_home_num(city_name, test_street)
             
-            if isinstance(home_num_raw, dict):
-                print(f"Успіх! Отримано словник з ключами: {list(home_num_raw.keys())}")
+            print(f"Успіх! Отримано об'єкт з {len(response.houses)} будинками.")
+            print(f"Останнє оновлення бази ДТЕК: {response.update_timestamp}")
+
+            if response.houses:
+                print(f"\nФрагмент списку будинків на {test_street}:")
+                # houses — це тепер словник об'єктів HouseEntry
+                for hn, entry in list(response.houses.items())[:5]:
+                    # Доступ через атрибути об'єкта
+                    print(f"  Будинок {hn:3} -> Головна група: {entry.primary_group}")
+            
+            if response.preset:
+                print(f"\nСтатус графіку: {'Активний' if response.preset.is_active else 'Неактивний'}")
                 
-                # У сирому JSON від ДТЕК будинки лежать у ключі "data", а не "houses"
-                houses = home_num_raw.get("data", {})
-                
-                if houses and isinstance(houses, dict):
-                    print(f"\nФрагмент списку будинків на {test_street}:")
-                    for hn, data in list(houses.items())[:5]:
-                        # Групи лежать у "group_ids"
-                        groups = data.get("group_ids", []) if isinstance(data, dict) else "Невідомо"
-                        print(f"  Будинок {hn:3} -> Групи відключень: {groups}")
-                else:
-                    print("Дані про будинки відсутні у ключі 'data'.")
-            else:
-                print("Помилка: отримано неочікуваний формат.")
         except Exception as e:
-            print(f"Помилка під час запиту: {e}")
+            print(f"Помилка валідації або запиту: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -135,12 +135,21 @@ class DtekClient:
         unique_names = sorted(list(set(str(s) for s in raw_streets if s)))
         return [StreetSuggestion(name=name) for name in unique_names]
 
-    async def get_home_num(self, city: str, street: str) -> dict[str, Any]:
-        """Fetch house numbers and schedule for a street. Returns raw dict."""
+    async def get_home_num(
+        self,
+        city: str,
+        street: str,
+    ) -> HomeNumResponse:
+        """Fetch houses and schedules, returning a validated HomeNumResponse object."""
         data = {
             "data[0][name]": "city",
             "data[0][value]": city,
             "data[1][name]": "street",
             "data[1][value]": street,
         }
-        return await self._request(METHOD_GET_HOME_NUM, data)
+        
+        # Отримуємо сирий словник
+        response = await self._request(METHOD_GET_HOME_NUM, data)
+        
+        # Перетворюємо його на об'єкт моделі
+        return HomeNumResponse.model_validate(response)
