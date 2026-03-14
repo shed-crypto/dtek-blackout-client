@@ -11,43 +11,28 @@ from dtek_client.client import DtekClient as DtekClient
 
 
 async def main() -> None:
-    print("--- Тестування DTEK API ---")
+    print("--- Тестування високорівневих методів DTEK API ---")
     
     async with DtekClient("kem") as client:
-        city_name = "м. Київ"
-        test_street = "вул. Хрещатик"
+        city = "м. Київ"
+        street = "вул. Хрещатик"
+        house = "10"
         
-        print(f"\n[1] Запит get_streets для '{city_name}':")
-        streets = await client.get_streets(city_name)
-        
-        if streets:
-            print(f"Успіх! Знайдено унікальних вулиць: {len(streets)}")
-            print("Перші 5 вулиць (вивід через об'єкти):")
-            for s in streets[:5]:
-                print(f"  • {s.name}") # Звертаємося до атрибута .name
-        else:
-            print("Вулиць не знайдено.")
-
-        print(f"\n[2] Запит get_home_num для '{test_street}':")
+        print(f"\nШукаємо групу для: {city}, {street}, буд. {house}")
         try:
-            # Тепер тут повноцінний об'єкт HomeNumResponse
-            response = await client.get_home_num(city_name, test_street)
+            # 1. Тестуємо пошук групи
+            result = await client.get_group_by_address(city, street, house)
+            print(f"Успіх! Знайдена група: {result.group_id}")
             
-            print(f"Успіх! Отримано об'єкт з {len(response.houses)} будинками.")
-            print(f"Останнє оновлення бази ДТЕК: {response.update_timestamp}")
-
-            if response.houses:
-                print(f"\nФрагмент списку будинків на {test_street}:")
-                # houses — це тепер словник об'єктів HouseEntry
-                for hn, entry in list(response.houses.items())[:5]:
-                    # Доступ через атрибути об'єкта
-                    print(f"  Будинок {hn:3} -> Головна група: {entry.primary_group}")
-            
-            if response.preset:
-                print(f"\nСтатус графіку: {'Активний' if response.preset.is_active else 'Неактивний'}")
+            # 2. Тестуємо розклад на сьогодні
+            today_slots = await client.get_today_schedule(city, street, house)
+            if today_slots:
+                print(f"Розклад на сьогодні отримано (кількість слотів: {len(today_slots)})")
+            else:
+                print("Графік на сьогодні не застосовується (пусто).")
                 
         except Exception as e:
-            print(f"Помилка валідації або запиту: {e}")
+            print(f"❌ Помилка: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

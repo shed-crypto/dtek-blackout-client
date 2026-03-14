@@ -15,6 +15,13 @@ class DtekAPIError(DtekClientError):
 class DtekUnauthorizedError(DtekAPIError):
     """Raised when the site returns 401/403 (WAF block or missing cookies)."""
 
+class DtekNotFoundError(DtekAPIError):
+    """Raised on HTTP 404 – page or resource not found."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Not found: {path}", status_code=404)
+        self.path = path
+
 class DtekRateLimitError(DtekAPIError):
     """Raised when hitting Cloudflare rate limits (429)."""
 

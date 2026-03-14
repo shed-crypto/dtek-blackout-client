@@ -12,9 +12,10 @@ from .exceptions import (
     DtekTimeoutError, 
     DtekAPIError,
     DtekUnauthorizedError,
-    DtekRateLimitError
+    DtekRateLimitError,
+    DtekNotFoundError
 )
-from .models import StreetSuggestion, HomeNumResponse
+from .models import StreetSuggestion, HomeNumResponse, AddressResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,3 +154,52 @@ class DtekClient:
         
         # Перетворюємо його на об'єкт моделі
         return HomeNumResponse.model_validate(response)
+    
+    
+    async def get_group_by_address(
+        self,
+        city: str,
+        street: str,
+        house_number: str,
+    ) -> AddressResult:
+        """Find the disconnection group for a specific address."""
+        response = await self.get_home_num(city, street)
+
+        entry = response.houses.get(house_number)
+        if entry is None:
+            raise DtekNotFoundError(
+                f"House {house_number!r} not found on {street!r}, {city!r}. "
+                f"Available numbers: {', '.join(sorted(response.houses.keys()))}"
+            )
+
+        group_id = entry.primary_group or "unknown"
+        group_name = ""
+        if response.preset and group_id in response.preset.sch_names:
+            group_name = response.preset.sch_names[group_id]
+
+        return AddressResult(
+            site_key=self._site_key,
+            city=city,
+            street=street,
+            house_number=house_number,
+            group_id=group_id,
+            group_display_name=group_name,
+        )
+
+    async def get_today_schedule(
+        self,
+        city: str,
+        street: str,
+        house_number: str,
+    ) -> dict[str, Any] | None:
+        """Shortcut: return today's fact-schedule slot map for one house."""
+        response = await self.get_home_num(city, street)
+        entry = response.houses.get(house_number)
+        
+        if entry is None or not entry.primary_group:
+            return None
+
+        if response.fact is None:
+            return None
+
+        return response.fact.get_group_today(entry.primary_group)
