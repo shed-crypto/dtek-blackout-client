@@ -3,9 +3,8 @@
 import logging
 from typing import Any
 
-import aiohttp
+from curl_cffi.requests import AsyncSession
 
-from .browser_auth import get_cleared_cookies
 from .const import DTEK_SITES, DEFAULT_TIMEOUT, METHOD_GET_STREETS, METHOD_GET_HOME_NUM
 from .exceptions import (
     DtekConnectionError, 
@@ -22,56 +21,51 @@ _LOGGER = logging.getLogger(__name__)
 class DtekClient:
     """Base client for fetching DTEK schedules."""
 
-    def __init__(self, site_key: str = "kem") -> None:
+    def __init__(
+        self, 
+        site_key: str = "kem",
+        ajax_url: str | None = None,
+        session: AsyncSession | None = None
+    ) -> None:
         if site_key not in DTEK_SITES:
             raise ValueError(f"Unknown site_key: {site_key}")
             
         self._site_key = site_key
         self._base_url, self._schedule_path = DTEK_SITES[site_key]
-        self._session: aiohttp.ClientSession | None = None
         
-        self._ajax_url = f"{self._base_url}/ua/ajax"
-        self._csrf_token: str | None = None
+        # Дозволяємо передавати готову сесію ззовні (як у manual_test.py)
+        self._session = session
+        self._owns_session = session is None
+        self._ajax_url = ajax_url or f"{self._base_url}/ua/ajax"
 
     async def connect(self) -> None:
-        """Initialize session and bypass WAF using Playwright function."""
+        """Initialize session and do a warmup GET request."""
         if self._session is None:
-            target_url = f"{self._base_url}{self._schedule_path}"
-            cookies_dict, csrf = await get_cleared_cookies(target_url)
-            
-            self._csrf_token = csrf
-            
-            self._session = aiohttp.ClientSession(
+            self._session = AsyncSession(
+                timeout=DEFAULT_TIMEOUT,
+                impersonate="chrome120",  # Нативна імітація Chrome!
                 headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "X-Requested-With": "XMLHttpRequest",
-                    "Referer": target_url,
+                    "Referer": f"{self._base_url}{self._schedule_path}",
                 }
             )
-            
-            # Фільтруємо куки, щоб aiohttp не впав через криві імена від Cloudflare/WordPress
-            reserved_keys = {"expires", "path", "comment", "domain", "max-age", "secure", "httponly", "version", "samesite"}
-            safe_cookies = {
-                name: value 
-                for name, value in cookies_dict.items() 
-                if name.lower() not in reserved_keys
-            }
-            
-            self._session.cookie_jar.update_cookies(safe_cookies)
-        
+            # Прогрівочний запит для отримання базових WAF-кук
+            try:
+                await self._session.get(f"{self._base_url}{self._schedule_path}")
+            except Exception as e:
+                raise DtekConnectionError(f"Failed to connect: {e}")
+
     async def close(self) -> None:
         """Close the session."""
-        if self._session:
-            await self._session.close()
+        if self._session and self._owns_session:
+            self._session.close()
             self._session = None
 
     async def __aenter__(self) -> "DtekClient":
-        """Enter the async context manager."""
         await self.connect()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit the async context manager and close the session."""
         await self.close()
         
     async def _request(self, method: str, data: dict[str, Any]) -> Any:
@@ -79,26 +73,21 @@ class DtekClient:
             await self.connect()
 
         payload = {"method": method, **data}
-        
-        headers = {}
-        if self._csrf_token:
-            headers["X-CSRF-TOKEN"] = self._csrf_token
 
         try:
-            async with self._session.post(
+            response = await self._session.post(
                 self._ajax_url, 
                 data=payload, 
-                headers=headers,
-                timeout=DEFAULT_TIMEOUT
-            ) as response:
-                
-                if response.status in (401, 403):
-                    raise DtekUnauthorizedError(f"Access denied: {response.status}. WAF is still blocking us.")
-                if response.status != 200:
-                    # Якщо 400 — можливо, ми не додали якийсь обов'язковий параметр AJAX
-                    raise DtekAPIError(f"API returned status {response.status}. Body: {await response.text()}")
-                
-                return await response.json()
+            )
+            
+            # У curl_cffi використовується status_code замість status
+            if response.status_code in (401, 403):
+                raise DtekUnauthorizedError(f"Access denied: {response.status_code}. WAF block.")
+            if response.status_code != 200:
+                raise DtekAPIError(f"API returned status {response.status_code}. Body: {response.text}")
+            
+            # У curl_cffi .json() — це синхронний метод, await не потрібен
+            return response.json()
         except Exception as e:
             _LOGGER.error("Request failed: %s", e)
             raise

@@ -6,6 +6,9 @@ Teammates working on the Home Assistant integration can start coding
 *immediately* without waiting for the real DTEK site to respond.
 """
 
+from .models import StreetSuggestion, HomeNumResponse, AddressResult
+from typing import Any
+
 # ── Hardcoded API Response Mock Data ──────────────────────────────────────────
 
 # Імітація відповіді на запит getStreets (список вулиць)
@@ -90,10 +93,26 @@ class StubDtekClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    async def get_streets(self, city: str, **kwargs) -> list[dict]:
-        """Return hardcoded raw JSON list of streets."""
-        return MOCK_STREETS_RESPONSE
+    async def get_streets(self, city: str, **kwargs) -> list[StreetSuggestion]:
+        """Return hardcoded list of StreetSuggestion objects."""
+        return [StreetSuggestion(name=s["name"]) for s in MOCK_STREETS_RESPONSE]
 
-    async def get_home_num(self, city: str, street: str, **kwargs) -> dict:
-        """Return hardcoded raw JSON response for houses and schedules."""
-        return MOCK_HOME_NUM_RESPONSE
+    async def get_home_num(self, city: str, street: str, **kwargs) -> HomeNumResponse:
+        """Return hardcoded HomeNumResponse model."""
+        return HomeNumResponse.model_validate(MOCK_HOME_NUM_RESPONSE)
+
+    async def get_group_by_address(self, city: str, street: str, house_number: str) -> AddressResult:
+        response = await self.get_home_num(city, street)
+        entry = response.houses.get(house_number)
+        group_id = entry.primary_group if entry else "unknown"
+        return AddressResult(
+            site_key=self.site_key, city=city, street=street, 
+            house_number=house_number, group_id=group_id
+        )
+
+    async def get_today_schedule(self, city: str, street: str, house_number: str) -> dict[str, Any] | None:
+        response = await self.get_home_num(city, street)
+        entry = response.houses.get(house_number)
+        if entry and entry.primary_group and response.fact:
+            return response.fact.get_group_today(entry.primary_group)
+        return None
