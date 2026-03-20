@@ -1,22 +1,35 @@
 """Async Python client for DTEK regional disconnection-schedule sites."""
 
 import logging
+import re
 from typing import Any
+from urllib.parse import urljoin
 
 from curl_cffi.requests import AsyncSession
 
-from .const import DTEK_SITES, DEFAULT_TIMEOUT, METHOD_GET_STREETS, METHOD_GET_HOME_NUM
+from .const import (
+    DTEK_SITES, 
+    DEFAULT_TIMEOUT, 
+    METHOD_GET_STREETS, 
+    METHOD_GET_HOME_NUM,
+    SCHEDULE_PAGE_FALLBACK_PATHS
+)
 from .exceptions import (
     DtekConnectionError, 
     DtekTimeoutError, 
     DtekAPIError,
     DtekUnauthorizedError,
     DtekRateLimitError,
-    DtekNotFoundError
+    DtekSiteError,
+    DtekNotFoundError,
 )
-from .models import StreetSuggestion, HomeNumResponse, AddressResult
+from .models import StreetSuggestion, HomeNumResponse
 
 _LOGGER = logging.getLogger(__name__)
+
+# Регулярки для парсингу HTML
+_META_RE = re.compile(r'<meta\s+name=["\']ajaxUrl["\']\s+content=["\']([^"\']+)["\']')
+_JS_VAR_RE = re.compile(r'var\s+ajaxUrl\s*=\s*["\']([^"\']+)["\']')
 
 class DtekClient:
     """Base client for fetching DTEK schedules."""
@@ -33,27 +46,45 @@ class DtekClient:
         self._site_key = site_key
         self._base_url, self._schedule_path = DTEK_SITES[site_key]
         
-        # Дозволяємо передавати готову сесію ззовні (як у manual_test.py)
         self._session = session
         self._owns_session = session is None
-        self._ajax_url = ajax_url or f"{self._base_url}/ua/ajax"
+        self._ajax_url = ajax_url
 
     async def connect(self) -> None:
-        """Initialize session and do a warmup GET request."""
+        """Initialize session and discover ajaxUrl."""
         if self._session is None:
             self._session = AsyncSession(
                 timeout=DEFAULT_TIMEOUT,
-                impersonate="chrome120",  # Нативна імітація Chrome!
+                impersonate="chrome120",
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "Referer": f"{self._base_url}{self._schedule_path}",
                 }
             )
-            # Прогрівочний запит для отримання базових WAF-кук
+            
+        if not self._ajax_url:
+            self._ajax_url = await self._discover_ajax_url()
+
+    async def _discover_ajax_url(self) -> str:
+        """Fetch schedule page and find AJAX endpoint via regex."""
+        # Беремо основний шлях і додаємо запасні
+        paths = [self._schedule_path] + [p for p in SCHEDULE_PAGE_FALLBACK_PATHS if p != self._schedule_path]
+        
+        for path in paths:
+            url = f"{self._base_url}{path}"
             try:
-                await self._session.get(f"{self._base_url}{self._schedule_path}")
+                # Поки що без циклу retry, просто пробуємо
+                response = await self._session.get(url) # type: ignore
+                if response.status_code == 200:
+                    html = response.text
+                    match = _META_RE.search(html) or _JS_VAR_RE.search(html)
+                    if match:
+                        extracted = match.group(1)
+                        return urljoin(self._base_url, extracted)
             except Exception as e:
-                raise DtekConnectionError(f"Failed to connect: {e}")
+                _LOGGER.debug("Failed to fetch %s: %s", url, e)
+                
+        raise DtekSiteError(f"Could not find ajaxUrl on {self._base_url}")
 
     async def close(self) -> None:
         """Close the session."""
@@ -69,7 +100,7 @@ class DtekClient:
         await self.close()
         
     async def _request(self, method: str, data: dict[str, Any]) -> Any:
-        if not self._session:
+        if not self._session or not self._ajax_url:
             await self.connect()
 
         payload = {"method": method, **data}
@@ -78,19 +109,16 @@ class DtekClient:
             response = await self._session.post(
                 self._ajax_url, 
                 data=payload, 
-            )
+            ) # type: ignore
             
-            # У curl_cffi використовується status_code замість status
             if response.status_code in (401, 403):
                 raise DtekUnauthorizedError(f"Access denied: {response.status_code}. WAF block.")
             if response.status_code != 200:
                 raise DtekAPIError(f"API returned status {response.status_code}. Body: {response.text}")
             
-            # У curl_cffi .json() — це синхронний метод, await не потрібен
             return response.json()
         except Exception as e:
-            _LOGGER.error("Request failed: %s", e)
-            raise
+            raise DtekConnectionError(f"Request failed: {e}") from e
 
     async def get_streets(self, city: str) -> list[StreetSuggestion]:
         """Fetch streets for a given city and return a list of StreetSuggestion objects."""
