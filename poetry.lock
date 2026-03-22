@@ -12,6 +12,11 @@ files = [
     {file = "annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89"},
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "example_test.py"]
+
 [[package]]
 name = "certifi"
 version = "2026.2.25"
@@ -603,3 +608,4 @@ typing-extensions = ">=4.12.0"
 lock-version = "2.1"
 python-versions = ">=3.11"
 content-hash = "91767c84eca52cf0a7bc9996f3d2345b7fe410b4acc54d520bdd613e4dca7846"
+
