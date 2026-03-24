@@ -1,4 +1,32 @@
-"""Async HTTP client for DTEK regional disconnection-schedule sites."""
+"""Async HTTP client for DTEK regional disconnection-schedule sites.
+
+Architecture
+------------
+DTEK regional sites (e.g. dtek-kem.com.ua, dtek-krem.com.ua) are WordPress
+applications. They have no public REST API; the frontend communicates with the
+server through an AJAX endpoint whose URL is embedded in the schedule page as:
+
+    <meta name="ajaxUrl" content="https://...">
+
+Note: the meta content may be a relative path ("/ua/ajax"). In that case
+the client prepends base_url automatically.
+
+This client:
+  1. Fetches the schedule page (tries several paths) and extracts ajaxUrl (cached).
+  2. Sends form-encoded AJAX requests (method=getStreets / getHomeNum).
+  3. Parses responses into Pydantic models.
+
+Quick start::
+
+    async with DtekClient("krem") as client:
+        streets = await client.get_streets("м. Українка")
+        result  = await client.get_group_by_address(
+            city="м. Українка",
+            street="вул. Юності",
+            house_number="10",
+        )
+        print(result)
+"""
 from __future__ import annotations
 
 import asyncio
@@ -76,7 +104,17 @@ _INCAPSULA_MARKERS = ("_Incapsula_Resource", "visid_incap", "incap_ses")
 
 
 def _resolve_ajax_url(raw: str, base_url: str) -> str:
-    """Resolve an ajaxUrl that may be a relative path."""
+    """Resolve an ajaxUrl that may be a relative path.
+
+    DTEK sites sometimes return a relative path in <meta name="ajaxUrl">,
+    e.g. content="/ua/ajax".  This function converts it to an absolute URL.
+
+    Examples::
+
+        "/ua/ajax"           + "https://www.dtek-krem.com.ua" → "https://www.dtek-krem.com.ua/ua/ajax"
+        "https://..."        + any                             → "https://..."  (unchanged)
+        "/ua/register/ajax"  + "https://www.dtek-krem.com.ua" → "https://www.dtek-krem.com.ua/ua/register/ajax"
+    """
     raw = raw.replace("\\/", "/").strip()
     parsed = urlparse(raw)
     if parsed.scheme:
@@ -87,7 +125,22 @@ def _resolve_ajax_url(raw: str, base_url: str) -> str:
 
 
 class DtekClient:
-    """Asynchronous client for DTEK regional disconnection-schedule sites."""
+    """Asynchronous client for DTEK regional disconnection-schedule sites.
+
+    Args:
+        site_key: one of the keys defined in ``DTEK_SITES``
+                  (e.g. ``"kem"``, ``"krem"``, ``"oem"`` …).
+                  Defaults to ``"kem"`` (DTEK Kyivenerho).
+        ajax_url: if provided, skip the meta-tag discovery step and use this
+                  URL directly for AJAX requests.  Useful for testing or when
+                  the site is behind a WAF and you have the URL from DevTools.
+        timeout: per-request timeout in seconds.
+        retry_attempts: number of retries on transient 5xx errors.
+        retry_delay: seconds between retries (linear back-off).
+        session: inject an existing ``curl_cffi.requests.AsyncSession``.
+                 In Home Assistant, pass the result of ``async_get_clientsession(hass)``
+                 wrapped in an adapter, or let the client create its own session.
+    """
 
     def __init__(
         self,
@@ -188,7 +241,18 @@ class DtekClient:
         return html
 
     async def _get_ajax_url(self) -> str:
-        """Return the ajaxUrl, discovering it from the schedule page if needed."""
+        """Return the ajaxUrl, discovering it from the schedule page if needed.
+
+        Discovery strategy (in priority order):
+
+        1. Already cached from a previous call.
+        2. Try the primary schedule_path from DTEK_SITES.
+        3. Try fallback paths from SCHEDULE_PAGE_FALLBACK_PATHS.
+        4. If nothing is found — use the hardcoded fallback: base_url + /ua/ajax.
+
+        Note: ajaxUrl in the meta tag may be a relative path ("/ua/ajax");
+        ``_resolve_ajax_url()`` converts it to an absolute URL.
+        """
         if self._ajax_url:
             return self._ajax_url
 
@@ -326,7 +390,15 @@ class DtekClient:
         fields: list[tuple[str, str]],
         update_fact: str | None = None,
     ) -> dict[str, Any]:
-        """Build the form dict expected by the DTEK AJAX handler."""
+        """Build the form dict expected by the DTEK AJAX handler.
+
+        The site uses jQuery's serializeArray() format::
+
+            method=getHomeNum
+            data[0][name]=city      data[0][value]=м. Українка
+            data[1][name]=street    data[1][value]=вул. Юності
+            data[2][name]=updateFact   data[2][value]=21.03.2026 16:25
+        """
         form: dict[str, Any] = {"method": method}
         for idx, (name, value) in enumerate(fields):
             form[f"data[{idx}][name]"] = name
@@ -345,7 +417,19 @@ class DtekClient:
         *,
         update_fact: str | None = None,
     ) -> list[StreetSuggestion]:
-        """Return all streets available in ``city`` on this DTEK site."""
+        """Return all streets available in ``city`` on this DTEK site.
+
+        Per discon-schedule.js (getStreetsInvisibly): getStreets sends only
+        ``method=getStreets`` with NO data array. The server returns the full
+        city→streets map for the whole region; we filter by city client-side.
+
+        Args:
+            city: city name as it appears on the site (e.g. "м. Українка").
+            update_fact: timestamp from a previous response (improves server caching).
+
+        Returns:
+            A list of :class:`StreetSuggestion` objects, one per street.
+        """
         form: dict[str, Any] = {"method": METHOD_GET_STREETS}
         raw = await self._post(form)
 
@@ -390,7 +474,19 @@ class DtekClient:
         *,
         update_fact: str | None = None,
     ) -> HomeNumResponse:
-        """Return all house numbers + group assignments for a city/street."""
+        """Return all house numbers + group assignments for a city/street.
+
+        This is the core method — it returns the full ``HomeNumResponse`` which
+        contains the house→group mapping **plus** the preset and fact schedules.
+
+        Args:
+            city: city name (e.g. "м. Українка").
+            street: street name (e.g. "вул. Юності").
+            update_fact: timestamp from a previous response (enables delta updates).
+
+        Returns:
+            :class:`HomeNumResponse` with all house entries and schedule data.
+        """
         form = self._build_form(
             METHOD_GET_HOME_NUM,
             [("city", city), ("street", street)],
@@ -438,8 +534,21 @@ class DtekClient:
         *,
         update_fact: str | None = None,
     ) -> AddressResult:
-        """Find the disconnection group for a specific address."""
-        response = await self.get_home_num(city, street)
+        """Find the disconnection group for a specific address.
+
+        Args:
+            city: city name (e.g. "м. Українка").
+            street: street name (e.g. "вул. Юності").
+            house_number: building number (e.g. "10", "10А", "10/2").
+            update_fact: optional timestamp from a previous response.
+
+        Returns:
+            :class:`AddressResult` with the group_id and display name.
+
+        Raises:
+            :exc:`DtekNotFoundError`: if the house number is not in the response.
+        """
+        response = await self.get_home_num(city, street, update_fact=update_fact)
 
         entry = response.houses.get(house_number)
         if entry is None:
@@ -470,8 +579,17 @@ class DtekClient:
         *,
         update_fact: str | None = None,
     ) -> dict[str, Any] | None:
-        """Shortcut: return today's fact-schedule slot map for one house."""
-        response = await self.get_home_num(city, street)
+        """Shortcut: return today's fact-schedule slot map for one house.
+
+        Each slot represents a 30-minute interval (e.g. "00:00–00:30").
+        SlotStatus.FIRST / SECOND indicate outage only in the first or second
+        half of the slot (~15 min each).
+
+        Returns:
+            dict mapping time-zone keys to :class:`SlotStatus`, or ``None``
+            if today's schedule is not yet published.
+        """
+        response = await self.get_home_num(city, street, update_fact=update_fact)
         entry = response.houses.get(house_number)
         if entry is None or not entry.primary_group:
             return None
