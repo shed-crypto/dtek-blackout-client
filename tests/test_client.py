@@ -129,3 +129,51 @@ class TestAjaxUrlDiscovery:
         client = DtekClient("kem", session=mock_session)
         url = await client._get_ajax_url()
         assert url == "https://example.com/wp-admin/admin-ajax.php"
+
+# ── Session lifecycle ─────────────────────────────────────────────────────────
+
+class TestSessionLifecycle:
+    async def test_no_session_raises_on_post(self) -> None:
+        """_post() without a session raises DtekConnectionError."""
+        client = DtekClient("kem", ajax_url="https://example.com/ajax")
+        with pytest.raises(DtekConnectionError):
+            await client._post({"method": "test"})
+
+    async def test_close_injected_session_is_noop(
+        self, mock_session: MagicMock
+    ) -> None:
+        """close() must NOT close an externally injected session."""
+        client = DtekClient("kem", session=mock_session)
+        await client.close()
+        mock_session.close.assert_not_called()
+
+    async def test_context_manager_opens_and_closes_own_session(self) -> None:
+        """Context manager creates a session on enter and closes it on exit."""
+        mock_sess = MagicMock()
+        mock_sess.close = AsyncMock()
+        # Warm-up GET during connect().
+        mock_sess.get = AsyncMock(
+            return_value=make_mock_response(status_code=200, text="")
+        )
+
+        with patch("dtek_client.client.AsyncSession", return_value=mock_sess):
+            async with DtekClient("kem", ajax_url="https://x.com/ajax") as client:
+                assert client._session is mock_sess
+
+        mock_sess.close.assert_called_once()
+
+# ── connect() warm-up GET ─────────────────────────────────────────────────────
+
+class TestConnectWarmUp:
+    async def test_warmup_failure_does_not_propagate(self) -> None:
+        """connect() swallows any exception from the initial warm-up GET request
+        so that a flaky WAF challenge page never prevents the client from starting."""
+        mock_sess = MagicMock()
+        mock_sess.get = AsyncMock(side_effect=Exception("warmup blocked by WAF"))
+        mock_sess.close = AsyncMock()
+
+        with patch("dtek_client.client.AsyncSession", return_value=mock_sess):
+            client = DtekClient("kem", ajax_url="https://x.com/ajax")
+            await client.connect()  # must not raise
+
+        assert client._session is mock_sess
