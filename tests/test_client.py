@@ -177,3 +177,94 @@ class TestConnectWarmUp:
             await client.connect()  # must not raise
 
         assert client._session is mock_sess
+
+# ── _post() — retry logic ─────────────────────────────────────────────────────
+
+class TestPostRetry:
+    async def test_retries_on_server_error_then_succeeds(
+        self, mock_session: MagicMock
+    ) -> None:
+        """On a 5xx response the client sleeps and retries; a successful response
+        on the next attempt is returned normally."""
+        mock_session.post = AsyncMock(
+            side_effect=[
+                make_mock_response(status_code=500),
+                make_mock_response(status_code=200, json_data={"result": True, "data": {}}),
+            ]
+        )
+        client = DtekClient(
+            "kem",
+            ajax_url="https://x.com/ajax",
+            session=mock_session,
+            retry_attempts=2,
+            retry_delay=0.0,
+        )
+        with patch("dtek_client.client.asyncio.sleep", new=AsyncMock()):
+            result = await client._post({"method": "test"})
+        assert result["result"] is True
+
+    async def test_all_retries_exhausted_raises_last_server_error(
+        self, mock_session: MagicMock
+    ) -> None:
+        """When every retry attempt ends with a 5xx error, the last
+        DtekServerError is re-raised so the caller knows the request failed."""
+        mock_session.post = AsyncMock(return_value=make_mock_response(status_code=503))
+        client = DtekClient(
+            "kem",
+            ajax_url="https://x.com/ajax",
+            session=mock_session,
+            retry_attempts=2,
+            retry_delay=0.0,
+        )
+        with patch("dtek_client.client.asyncio.sleep", new=AsyncMock()):
+            with pytest.raises(DtekServerError):
+                await client._post({"method": "test"})
+
+    async def test_unauthorized_is_not_retried(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """401 responses are not transient — re-raise immediately without retry."""
+        client_with_ajax._session.post = AsyncMock(  # type: ignore[union-attr]
+            return_value=make_mock_response(status_code=401)
+        )
+        with pytest.raises(DtekUnauthorizedError):
+            await client_with_ajax._post({"method": "test"})
+
+    async def test_rate_limit_is_not_retried(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """429 responses are not retried — the caller should honour Retry-After."""
+        client_with_ajax._session.post = AsyncMock(  # type: ignore[union-attr]
+            return_value=make_mock_response(status_code=429)
+        )
+        with pytest.raises(DtekRateLimitError):
+            await client_with_ajax._post({"method": "test"})
+
+    async def test_not_found_is_not_retried(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """404 from the AJAX endpoint means the resource genuinely does not exist
+        and should not be retried."""
+        client_with_ajax._session.post = AsyncMock(  # type: ignore[union-attr]
+            return_value=make_mock_response(status_code=404)
+        )
+        with pytest.raises(DtekNotFoundError):
+            await client_with_ajax._post({"method": "test"})
+
+
+# ── _handle_response() — Retry-After edge case ────────────────────────────────
+
+class TestHandleResponseRetryAfterHeader:
+    def test_non_numeric_retry_after_is_treated_as_none(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """When Retry-After contains an HTTP-date string rather than a number
+        of seconds, parsing fails gracefully and retry_after is left as None."""
+        resp = make_mock_response(
+            status_code=429,
+            headers={"Retry-After": "Mon, 29 Mar 2026 12:00:00 GMT"},
+        )
+        with pytest.raises(DtekRateLimitError) as ei:
+            client_with_ajax._handle_response(resp, "/test")
+        assert ei.value.retry_after is None
+
