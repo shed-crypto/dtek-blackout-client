@@ -130,6 +130,59 @@ class TestAjaxUrlDiscovery:
         url = await client._get_ajax_url()
         assert url == "https://example.com/wp-admin/admin-ajax.php"
 
+# ── get_today_schedule ────────────────────────────────────────────────────────
+
+class TestGetTodaySchedule:
+    async def test_returns_slot_map(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        slots = await client_with_ajax.get_today_schedule(
+            "м. Українка", "вул. Юності", "1"
+        )
+        assert slots is not None
+        assert slots["1"] is SlotStatus.NO
+
+    async def test_house_not_found_returns_none(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_today_schedule(
+            "м. Українка", "вул. Юності", "999"
+        )
+        assert result is None
+
+    async def test_no_fact_returns_none(self, client_with_ajax: DtekClient) -> None:
+        raw: dict[str, Any] = {
+            "result": True,
+            "data": {
+                "1": {
+                    "sub_type_reason": ["GPV3.1"],
+                    "sub_type": "", "start_date": "", "end_date": "",
+                    "type": "", "voluntarily": None,
+                }
+            },
+            "showCurSchedule": False, "showTablePlan": False,
+            "showTableFact": False, "showTableSchedule": False,
+        }
+        client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_today_schedule(
+            "м. Українка", "вул. Юності", "1"
+        )
+        assert result is None
+
+    async def test_slot_values_are_slot_status(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        slots = await client_with_ajax.get_today_schedule(
+            "м. Українка", "вул. Юності", "1"
+        )
+        assert slots is not None
+        for v in slots.values():
+            assert isinstance(v, SlotStatus)
+
+
 # ── Session lifecycle ─────────────────────────────────────────────────────────
 
 class TestSessionLifecycle:
@@ -268,3 +321,143 @@ class TestHandleResponseRetryAfterHeader:
             client_with_ajax._handle_response(resp, "/test")
         assert ei.value.retry_after is None
 
+# ── get_streets() — edge cases ────────────────────────────────────────────────
+
+class TestGetStreetsEdgeCases:
+    async def test_case_insensitive_city_lookup(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """City keys in the AJAX response may use different capitalisation than
+        the user's query; the client falls back to a case-insensitive comparison."""
+        client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={"streets": {"м. Українка": ["вул. Юності", "вул. Садова"]}}
+        )
+        streets = await client_with_ajax.get_streets("м. Українка")
+        assert len(streets) == 2
+
+    async def test_city_value_not_a_list_returns_empty(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """If the server sends a city entry whose value is not a list (malformed
+        response), the method returns an empty list rather than crashing."""
+        client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={"streets": {"м. Українка": {"nested": "unexpected"}}}
+        )
+        assert await client_with_ajax.get_streets("м. Українка") == []
+
+    async def test_completely_unexpected_streets_type_returns_empty(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """If the streets value is neither dict nor list (e.g. a plain string),
+        the method returns an empty list and logs a warning."""
+        client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={"streets": "totally_wrong"}
+        )
+        assert await client_with_ajax.get_streets("м. Українка") == []
+
+    async def test_case_insensitive_loop_body_is_executed(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """Checks the body of the case-insensitive loop (city_streets = v; break).
+
+        The key in the response is 'm. Ukrainka' (lower case).
+        The query is 'M. UKRAINE' (upper case).
+        An exact match via .get() fails, so the loop executes;
+        when k.lower() matches city.lower(), city_streets is assigned
+        and break is called — these are the two lines that are covered."""
+        client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={"streets": {"м. Українка": ["вул. Юності", "вул. Садова"]}}
+        )
+        streets = await client_with_ajax.get_streets("М. УКРАЇНКА")
+        assert len(streets) == 2
+        assert streets[0].name == "вул. Юності"
+
+# ── get_home_num() — global schedule fallback ─────────────────────────────────
+
+class TestGetHomeNumGlobalSchedule:
+    """When the getHomeNum response contains no preset/fact, the client fetches
+    them separately via checkDisconUpdate and merges the result."""
+
+    def _raw_without_schedule(self) -> dict[str, Any]:
+        return {
+            "data": {
+                "1": {
+                    "sub_type_reason": ["GPV3.1"],
+                    "sub_type": "", "start_date": "", "end_date": "",
+                    "type": "", "voluntarily": None,
+                }
+            },
+            "showCurSchedule": False, "showTablePlan": False,
+            "showTableFact": False, "showTableSchedule": False,
+        }
+
+    async def test_global_schedule_merged_when_present(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        """preset and fact from the global schedule are injected into the result
+        when the primary response omits them."""
+        base = self._raw_without_schedule()
+        global_sched = {"preset": home_num_raw["preset"], "fact": home_num_raw["fact"]}
+        call_count = 0
+
+        async def _side_effect(form: dict) -> dict:  # type: ignore[type-arg]
+            nonlocal call_count
+            call_count += 1
+            return base if call_count == 1 else global_sched
+
+        client_with_ajax._post = _side_effect  # type: ignore[method-assign]
+        result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        assert result.preset is not None
+        assert result.fact is not None
+
+    async def test_global_schedule_fetch_failure_is_swallowed(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """A network error while fetching the global schedule is caught and logged;
+        the partial result (without preset/fact) is still returned."""
+        base = self._raw_without_schedule()
+        call_count = 0
+
+        async def _side_effect(form: dict) -> dict:  # type: ignore[type-arg]
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return base
+            raise Exception("global schedule unavailable")
+
+        client_with_ajax._post = _side_effect  # type: ignore[method-assign]
+        result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        assert isinstance(result, HomeNumResponse)
+        assert result.preset is None
+
+    async def test_empty_global_schedule_leaves_preset_absent(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """An empty global schedule response means there is genuinely no data
+        to merge; preset and fact remain None."""
+        base = self._raw_without_schedule()
+        call_count = 0
+
+        async def _side_effect(form: dict) -> dict:  # type: ignore[type-arg]
+            nonlocal call_count
+            call_count += 1
+            return base if call_count == 1 else {}
+
+        client_with_ajax._post = _side_effect  # type: ignore[method-assign]
+        result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        assert result.preset is None
+
+    async def test_validation_error_raises_data_error(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """When the AJAX response cannot be parsed into HomeNumResponse (e.g.
+        preset is a string instead of an object), a DtekDataError is raised."""
+        raw: dict[str, Any] = {
+            "data": {},
+            "preset": "not_an_object",
+            "showCurSchedule": False, "showTablePlan": False,
+            "showTableFact": False, "showTableSchedule": False,
+        }
+        client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
+        with pytest.raises(DtekDataError):
+            await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
