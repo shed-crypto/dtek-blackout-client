@@ -130,6 +130,217 @@ class TestAjaxUrlDiscovery:
         url = await client._get_ajax_url()
         assert url == "https://example.com/wp-admin/admin-ajax.php"
 
+
+# ── _build_form ────────────────────────────────────────────────────────────────
+
+class TestBuildForm:
+    def test_simple(self) -> None:
+        form = DtekClient._build_form("getStreets", [("city", "м. Українка")])
+        assert form["method"] == "getStreets"
+        assert form["data[0][name]"] == "city"
+        assert form["data[0][value]"] == "м. Українка"
+
+    def test_with_update_fact(self) -> None:
+        form = DtekClient._build_form(
+            "getHomeNum",
+            [("city", "м. Київ"), ("street", "вул. Хрещатик")],
+            update_fact="26.03.2026 14:00",
+        )
+        assert form["data[2][name]"] == "updateFact"
+        assert form["data[2][value]"] == "26.03.2026 14:00"
+
+    def test_multiple_fields_indexed(self) -> None:
+        form = DtekClient._build_form(
+            "getHomeNum",
+            [("city", "A"), ("street", "B")],
+        )
+        assert form["data[0][name]"] == "city"
+        assert form["data[1][name]"] == "street"
+        assert "data[2][name]" not in form
+
+    def test_no_fields(self) -> None:
+        """Form with no fields should only contain method."""
+        form = DtekClient._build_form("getStreets", [])
+        assert form == {"method": "getStreets"}
+
+
+# ── _handle_response ──────────────────────────────────────────────────────────
+# NOTE: _handle_response is a synchronous method (no await needed).
+
+class TestHandleResponse:
+    def _mock_resp(
+        self, status_code: int, headers: dict | None = None, json_data: Any = None
+    ) -> MagicMock:
+        return make_mock_response(
+            status_code=status_code, headers=headers or {}, json_data=json_data
+        )
+
+    def test_401_raises_unauthorized(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekUnauthorizedError):
+            client_with_ajax._handle_response(self._mock_resp(401), "/test")
+
+    def test_404_raises_not_found(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekNotFoundError):
+            client_with_ajax._handle_response(self._mock_resp(404), "/test")
+
+    def test_429_no_header(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekRateLimitError) as ei:
+            client_with_ajax._handle_response(self._mock_resp(429), "/test")
+        assert ei.value.retry_after is None
+
+    def test_429_with_header(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekRateLimitError) as ei:
+            client_with_ajax._handle_response(
+                self._mock_resp(429, headers={"Retry-After": "30"}), "/test"
+            )
+        assert ei.value.retry_after == 30.0
+
+    def test_500_raises_server_error(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekServerError):
+            client_with_ajax._handle_response(self._mock_resp(500), "/test")
+
+    def test_503_raises_server_error(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekServerError) as ei:
+            client_with_ajax._handle_response(self._mock_resp(503), "/test")
+        assert ei.value.status_code == 503
+
+    def test_400_raises_api_error(self, client_with_ajax: DtekClient) -> None:
+        with pytest.raises(DtekAPIError):
+            client_with_ajax._handle_response(self._mock_resp(400), "/test")
+
+    def test_200_returns_json(self, client_with_ajax: DtekClient) -> None:
+        resp = self._mock_resp(200, json_data={"result": True, "data": {}})
+        result = client_with_ajax._handle_response(resp, "/test")
+        assert result == {"result": True, "data": {}}
+
+    def test_200_bad_json_raises_data_error(self, client_with_ajax: DtekClient) -> None:
+        resp = self._mock_resp(200)
+        resp.json = MagicMock(side_effect=ValueError("not json"))
+        with pytest.raises(DtekDataError):
+            client_with_ajax._handle_response(resp, "/test")
+
+    def test_result_false_raises_data_error(self, client_with_ajax: DtekClient) -> None:
+        resp = self._mock_resp(200, json_data={"result": False})
+        with pytest.raises(DtekDataError):
+            client_with_ajax._handle_response(resp, "/test")
+
+
+# ── get_streets ────────────────────────────────────────────────────────────────
+
+class TestGetStreets:
+    async def test_success_dict_format(
+        self, client_with_ajax: DtekClient, streets_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=streets_raw)  # type: ignore[method-assign]
+        streets = await client_with_ajax.get_streets("м. Українка")
+        assert len(streets) > 0
+        assert all(isinstance(s.name, str) and len(s.name) > 0 for s in streets)
+
+    async def test_success_list_format(self, client_with_ajax: DtekClient) -> None:
+        client_with_ajax._post = AsyncMock(return_value={  # type: ignore[method-assign]
+            "result": True,
+            "data": ["вул. А", "вул. Б"],
+        })
+        streets = await client_with_ajax.get_streets("м. Тест")
+        assert len(streets) == 2
+
+    async def test_non_dict_raises_data_error(self, client_with_ajax: DtekClient) -> None:
+        client_with_ajax._post = AsyncMock(return_value="not a dict")  # type: ignore[method-assign]
+        with pytest.raises(DtekDataError):
+            await client_with_ajax.get_streets("м. Тест")
+
+    async def test_empty_data_returns_empty_list(self, client_with_ajax: DtekClient) -> None:
+        client_with_ajax._post = AsyncMock(return_value={"result": True, "data": {}})  # type: ignore[method-assign]
+        streets = await client_with_ajax.get_streets("м. Тест")
+        assert streets == []
+
+    async def test_city_not_found_returns_empty(self, client_with_ajax: DtekClient) -> None:
+        client_with_ajax._post = AsyncMock(return_value={  # type: ignore[method-assign]
+            "streets": {"м. Інше": ["вул. Центральна"]},
+        })
+        streets = await client_with_ajax.get_streets("м. Невідоме")
+        assert streets == []
+
+
+# ── get_home_num ──────────────────────────────────────────────────────────────
+
+class TestGetHomeNum:
+    async def test_success(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        assert isinstance(result, HomeNumResponse)
+        assert "1" in result.houses
+
+    async def test_non_dict_raises(self, client_with_ajax: DtekClient) -> None:
+        client_with_ajax._post = AsyncMock(return_value=[1, 2, 3])  # type: ignore[method-assign]
+        with pytest.raises(DtekDataError):
+            await client_with_ajax.get_home_num("м. Тест", "вул. Тест")
+
+    async def test_preset_parsed(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        assert result.preset is not None
+        assert "GPV3.1" in result.preset.groups
+
+    async def test_fact_parsed(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        assert result.fact is not None
+        assert result.fact.today_ts == 1774483200
+
+
+# ── get_group_by_address ──────────────────────────────────────────────────────
+
+class TestGetGroupByAddress:
+    async def test_success(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_group_by_address(
+            "м. Українка", "вул. Юності", "1"
+        )
+        assert isinstance(result, AddressResult)
+        assert result.group_id == "GPV3.1"
+        assert result.house_number == "1"
+
+    async def test_house_not_found_raises(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        with pytest.raises(DtekNotFoundError):
+            await client_with_ajax.get_group_by_address(
+                "м. Українка", "вул. Юності", "999"
+            )
+
+    async def test_group_display_name_populated(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_group_by_address(
+            "м. Українка", "вул. Юності", "1"
+        )
+        assert isinstance(result.group_display_name, str)
+        assert len(result.group_display_name) > 0
+
+    async def test_result_contains_site_and_address(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_group_by_address(
+            "м. Українка", "вул. Юності", "2"
+        )
+        assert result.site_key == "kem"
+        assert result.city == "м. Українка"
+        assert result.street == "вул. Юності"
+        assert result.group_id == "GPV3.2"
+
+
 # ── get_today_schedule ────────────────────────────────────────────────────────
 
 class TestGetTodaySchedule:
@@ -231,6 +442,88 @@ class TestConnectWarmUp:
 
         assert client._session is mock_sess
 
+
+# ── _fetch_page_html() ────────────────────────────────────────────────────────
+
+class TestFetchPageHtml:
+    async def test_404_returns_none(self, mock_session: MagicMock) -> None:
+        """A 404 response is treated as 'path not found' and returns None
+        so the caller can try the next fallback path."""
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=404))
+        client = DtekClient("kem", session=mock_session)
+        assert await client._fetch_page_html("/ua/shutdowns") is None
+
+    async def test_5xx_raises_server_error(self, mock_session: MagicMock) -> None:
+        """A 5xx response from the schedule page is a hard failure —
+        raise DtekServerError immediately rather than silently ignoring it."""
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=503))
+        client = DtekClient("kem", session=mock_session)
+        with pytest.raises(DtekServerError) as ei:
+            await client._fetch_page_html("/ua/shutdowns")
+        assert ei.value.status_code == 503
+
+    async def test_network_error_raises_connection_error(
+        self, mock_session: MagicMock
+    ) -> None:
+        """A curl_cffi RequestsError (e.g. DNS failure, connection refused)
+        is wrapped in DtekConnectionError with the original message preserved."""
+        from curl_cffi.requests.errors import RequestsError
+
+        mock_session.get = AsyncMock(side_effect=RequestsError("connection refused"))
+        client = DtekClient("kem", session=mock_session)
+        with pytest.raises(DtekConnectionError):
+            await client._fetch_page_html("/ua/shutdowns")
+
+    async def test_incapsula_waf_page_returns_none(
+        self, mock_session: MagicMock
+    ) -> None:
+        """When the schedule page is an Incapsula/Imperva JS challenge (recognisable
+        by the _Incapsula_Resource marker), it is treated like a missing page so
+        the client falls through to the next discovery path."""
+        waf_html = (
+            "<html><body>"
+            "var _Incapsula_Resource = {};"
+            "</body></html>"
+        )
+        mock_session.get = AsyncMock(
+            return_value=make_mock_response(status_code=200, text=waf_html)
+        )
+        client = DtekClient("kem", session=mock_session)
+        assert await client._fetch_page_html("/ua/shutdowns") is None
+
+    async def test_visid_incap_marker_also_triggers_waf_detection(
+        self, mock_session: MagicMock
+    ) -> None:
+        """The visid_incap cookie marker is another signal that the page is a
+        WAF challenge rather than real schedule content."""
+        waf_html = "<script>document.cookie='visid_incap_123=abc';</script>"
+        mock_session.get = AsyncMock(
+            return_value=make_mock_response(status_code=200, text=waf_html)
+        )
+        client = DtekClient("kem", session=mock_session)
+        assert await client._fetch_page_html("/ua/shutdowns") is None
+
+
+# ── _get_ajax_url() — fallback path iteration ─────────────────────────────────
+
+class TestAjaxUrlFallbackIteration:
+    async def test_skips_404_path_and_uses_next(self, mock_session: MagicMock) -> None:
+        """When the primary schedule path returns 404, the client moves on to
+        the next fallback path and extracts the ajaxUrl from there."""
+        good_html = (
+            '<meta name="ajaxUrl" content="https://www.dtek-kem.com.ua/ua/ajax">'
+        )
+        mock_session.get = AsyncMock(
+            side_effect=[
+                make_mock_response(status_code=404),           # primary → skip
+                make_mock_response(status_code=200, text=good_html),  # fallback → found
+            ]
+        )
+        client = DtekClient("kem", session=mock_session)
+        url = await client._get_ajax_url()
+        assert url == "https://www.dtek-kem.com.ua/ua/ajax"
+
+
 # ── _post() — retry logic ─────────────────────────────────────────────────────
 
 class TestPostRetry:
@@ -320,6 +613,7 @@ class TestHandleResponseRetryAfterHeader:
         with pytest.raises(DtekRateLimitError) as ei:
             client_with_ajax._handle_response(resp, "/test")
         assert ei.value.retry_after is None
+
 
 # ── get_streets() — edge cases ────────────────────────────────────────────────
 
