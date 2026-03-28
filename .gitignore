@@ -1,15 +1,61 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.python-version
+
+# --- Virtual Environments ---
 .venv/
 venv/
 env/
+ENV/
+build/
+dist/
 
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# --- Poetry ---
+# poetry.lock 
 
-.vscode/
+# --- Testing & Coverage ---
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+nosetests.xml
+pytest.xml
+
+# --- Static Analysis & Linting ---
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints
+
+# --- Playwright ---
+test-results/
+playwright-report/
+blob-report/
+playwright/.local-browsers/
+
+# --- IDEs & Editors ---
+# JetBrains (PyCharm)
 .idea/
+*.iws
 
-.storage/
-home-assistant.log
-home-assistant_v2.db
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Environment Variables ---
+.env
+.env.*
+!.env.example
