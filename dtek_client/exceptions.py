@@ -1,9 +1,23 @@
-"""Custom exception classes for dtek-blackout-client."""
+"""Custom exception classes for dtek-blackout-client.
+
+Hierarchy:
+    DtekClientError                  (base)
+    ├── DtekConnectionError          (network / connectivity issues)
+    │   ├── DtekTimeoutError         (request timed out)
+    │   └── DtekSSLError             (TLS/SSL handshake failure)
+    ├── DtekAPIError                 (server returned an error response)
+    │   ├── DtekUnauthorizedError    (401)
+    │   ├── DtekNotFoundError        (404)
+    │   ├── DtekRateLimitError       (429)
+    │   └── DtekServerError          (5xx)
+    ├── DtekDataError                (response cannot be parsed)
+    └── DtekSiteError                (site configuration / meta discovery issue)
+"""
 from __future__ import annotations
 
 
 class DtekClientError(Exception):
-    """Base exception for all DTEK client errors."""
+    """Base exception for all ДТЕК client errors."""
 
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -32,7 +46,7 @@ class DtekTimeoutError(DtekConnectionError):
 
 
 class DtekSSLError(DtekConnectionError):
-    """Raised when the TLS/SSL handshake with the DTEK site fails."""
+    """Raised when the TLS/SSL handshake with the ДТЕК site fails."""
 
 
 # ── API / HTTP ────────────────────────────────────────────────────────────────
@@ -45,7 +59,7 @@ class DtekUnauthorizedError(DtekAPIError):
     """Raised on HTTP 401."""
 
     def __init__(self) -> None:
-        super().__init__("Unauthorized: DTEK site rejected the request.", status_code=401)
+        super().__init__("Unauthorized: ДТЕК site rejected the request.", status_code=401)
 
 
 class DtekNotFoundError(DtekAPIError):

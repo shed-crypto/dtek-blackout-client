@@ -1,4 +1,22 @@
-"""Pydantic models for dtek-blackout-client."""
+"""Pydantic models for dtek-blackout-client.
+
+Terminology (as returned by the DTEK site):
+    preset   – static weekly outage plan
+    fact     – confirmed daily schedule (published by NPC Ukrenerho)
+    slot     – a 30-minute time interval (e.g. "00:00–00:30")
+    group_id – disconnection group identifier (e.g. "GPV3.1")
+
+Slot status values:
+    yes     → electricity available (no outage)
+    no      → definite outage for the whole slot
+    maybe   → possible outage for the whole slot
+    first   → outage in the first half of the slot (~15 min)
+    second  → outage in the second half of the slot (~15 min)
+    mfirst  → possible outage in the first half
+    msecond → possible outage in the second half
+
+All models are frozen=True — safe to pass between coroutines.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -21,14 +39,14 @@ class _FrozenModel(BaseModel):
 class SlotStatus(str, Enum):
     """Possible status values for a time-slot cell in the DTEK schedule table."""
 
-    YES = "yes"
-    NO = "no"
-    MAYBE = "maybe"
-    FIRST = "first"
-    SECOND = "second"
-    MFIRST = "mfirst"
-    MSECOND = "msecond"
-    UNKNOWN = "unknown"
+    YES = "yes"        # Electricity available — no outage
+    NO = "no"          # Definite outage for the whole slot
+    MAYBE = "maybe"    # Possible outage for the whole slot
+    FIRST = "first"    # Outage in the first half of the slot (~15 min)
+    SECOND = "second"  # Outage in the second half of the slot (~15 min)
+    MFIRST = "mfirst"    # Possible outage in the first half
+    MSECOND = "msecond"  # Possible outage in the second half
+    UNKNOWN = "unknown"  # Fallback for unrecognised values
 
     @classmethod
     def _missing_(cls, value: object) -> "SlotStatus":
@@ -52,13 +70,19 @@ class SlotStatus(str, Enum):
 # ── Weekly planned schedule (preset.data) ─────────────────────────────────────
 
 class WeekDaySchedule(_FrozenModel):
-    """Schedule for one disconnection group on one day of the week."""
+    """Schedule for one disconnection group on one day of the week.
+
+    ``slots`` maps a time-zone key (e.g. "1", "2", …, "48") to a SlotStatus.
+    The human-readable time labels (e.g. "00:00–00:30") live in
+    ``PresetSchedule.time_zone``.
+    """
 
     slots: dict[str, SlotStatus] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
     def _coerce_slots(cls, data: Any) -> Any:
+        """Accept a raw {slot_key: str_value} dict from the AJAX response."""
         if not isinstance(data, dict):
             return data
         return {
@@ -71,23 +95,39 @@ class WeekDaySchedule(_FrozenModel):
 
     @property
     def outage_slot_count(self) -> int:
+        """Number of slots with a definite outage."""
         return sum(1 for s in self.slots.values() if s.has_outage)
 
     @property
     def has_any_outage(self) -> bool:
+        """True if at least one slot has a definite outage."""
         return self.outage_slot_count > 0
 
+
 class GroupWeekSchedule(_FrozenModel):
+    """Weekly planned schedule for one disconnection group.
+
+    ``days`` maps a DTEK day-index (1=Mon, …, 7=Sun) to a WeekDaySchedule.
+    """
+
     group_id: str
     days: dict[int, WeekDaySchedule] = Field(default_factory=dict)
 
     def get_day(self, dtek_weekday: int) -> WeekDaySchedule | None:
         """Return the schedule for a given DTEK weekday (1–7)."""
         return self.days.get(dtek_weekday)
-    
+
 
 class PresetSchedule(_FrozenModel):
-    """Full static (planned) weekly schedule as returned in ``preset``.    """
+    """Full static (planned) weekly schedule as returned in ``preset``.
+
+    Attributes:
+        groups    – dict of group_id → GroupWeekSchedule
+        time_zone – time-slot labels, e.g. {"1": "00:00–00:30", …}
+        sch_names – group display names, e.g. {"GPV3.1": "Черга 3.1"}
+        days      – day names, e.g. {1: "Понеділок", …}
+        is_active – False if the schedule is empty or inactive
+    """
 
     groups: dict[str, GroupWeekSchedule] = Field(default_factory=dict)
     time_zone: dict[str, str] = Field(default_factory=dict)
@@ -146,11 +186,14 @@ class PresetSchedule(_FrozenModel):
     def available_groups(self) -> list[str]:
         """Sorted list of group IDs present in this schedule."""
         return sorted(self.groups.keys())
-    
+
+
 # ── Actual (fact) schedule ────────────────────────────────────────────────────
 
 class FactDaySchedule(_FrozenModel):
     """Actual confirmed schedule for one group on one specific calendar day.
+
+    ``slots`` maps a time-zone key to a SlotStatus (same keys as preset.time_zone).
     """
 
     group_id: str
@@ -175,6 +218,10 @@ class FactDaySchedule(_FrozenModel):
 
 class FactSchedule(_FrozenModel):
     """Confirmed actual schedule for today (and possibly tomorrow) from ``fact``.
+
+    ``days`` maps unix-timestamp strings to per-group slot maps.
+    ``today_ts`` is the unix timestamp of today (from ``fact.today``).
+    ``update`` is the last-updated timestamp string from the site.
     """
 
     today_ts: int
@@ -219,12 +266,20 @@ class FactSchedule(_FrozenModel):
     def get_group_day(self, ts: int, group_id: str) -> dict[str, SlotStatus] | None:
         """Return the slot map for a specific day (by unix timestamp) and group."""
         return self.days.get(str(ts), {}).get(group_id)
-    
+
 
 # ── House entry (from getHomeNum response) ────────────────────────────────────
 
 class HouseEntry(_FrozenModel):
     """One house from the ``getHomeNum`` AJAX response.
+
+    Attributes:
+        house_number  – key from the ``data`` dict (e.g. "1", "1A", "3/B")
+        group_ids     – list from ``sub_type_reason`` (e.g. ["GPV3.1"])
+        is_multi_group – True when len(group_ids) > 1
+        is_excluded    – True when group_ids is empty (address not in schedule)
+        sub_type       – non-empty when there is a current planned outage reason
+        outage_type    – "1" = planned works, "2" = other
     """
 
     house_number: str
@@ -267,6 +322,16 @@ class HouseEntry(_FrozenModel):
 
 class HomeNumResponse(_FrozenModel):
     """Full parsed response from the ``getHomeNum`` AJAX call.
+
+    Attributes:
+        houses              – dict of house_number → HouseEntry
+        preset              – static weekly schedule (or None if not returned)
+        fact                – confirmed daily schedule (or None if not returned)
+        show_cur_schedule   – True if the site currently shows the schedule table
+        show_table_plan     – True if the static plan table should be shown
+        show_table_fact     – True if the fact table should be shown
+        show_table_schedule – True if the schedule table should be shown
+        update_timestamp    – display string like "26.03.2026 14:00"
     """
 
     houses: dict[str, HouseEntry] = Field(default_factory=dict)
@@ -323,14 +388,20 @@ class HomeNumResponse(_FrozenModel):
         """Sorted list of all house numbers in this response."""
         return sorted(self.houses.keys())
 
+
 # ── Street suggestion ─────────────────────────────────────────────────────────
 
 class StreetSuggestion(_FrozenModel):
+    """One street returned by the ``getStreets`` AJAX call.
+
+    The DTEK site returns a plain list of street name strings.
+    """
 
     name: str
 
     def __str__(self) -> str:
         return self.name
+
 
 # ── Address lookup result ─────────────────────────────────────────────────────
 

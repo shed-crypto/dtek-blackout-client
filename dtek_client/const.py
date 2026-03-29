@@ -1,9 +1,26 @@
-"""Constants for the dtek-blackout-client."""
+"""Constants for the dtek-blackout-client.
+
+DTEK operates a separate WordPress site for each regional subsidiary.
+The AJAX endpoint URL is embedded in each page as:
+    <meta name="ajaxUrl" content="...">
+Note: the content may be a relative path (e.g. "/ua/ajax") rather than
+a full URL — DtekClient._get_ajax_url() handles both cases.
+
+Supported regions (SiteKey):
+    kem   – DTEK Kyivenerho        (Kyiv city and Kyiv oblast, large cities)
+    krem  – DTEK Kyiv Regional     (Kyiv oblast, smaller towns)
+    dnem  – DTEK Dnipro            (Dnipro, Dnipropetrovsk oblast)
+    dem   – DTEK Donetsk           (government-controlled part of Donetsk oblast)
+    oem   – DTEK Odesa             (Odesa, Odesa oblast)
+    zem   – DTEK Zaporizhzhia      (Zaporizhzhia)
+"""
 
 from typing import Final
 
 # ── Regional site registry ────────────────────────────────────────────────────
 # Tuple: (base_url, schedule_page_path)
+# schedule_page_path — page that contains <meta name="ajaxUrl">.
+# If the primary path does not work, the client tries SCHEDULE_PAGE_FALLBACK_PATHS.
 DTEK_SITES: Final[dict[str, tuple[str, str]]] = {
     "kem":  ("https://www.dtek-kem.com.ua",  "/ua/shutdowns"),
     "krem": ("https://www.dtek-krem.com.ua", "/ua/shutdowns"),

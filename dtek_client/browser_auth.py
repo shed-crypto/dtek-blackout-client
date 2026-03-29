@@ -1,4 +1,19 @@
-"""Playwright-based helper to bypass WAF protection on DTEK sites."""
+"""Playwright-based helper to bypass WAF protection on DTEK sites.
+
+Some DTEK regional sites are protected by Incapsula/Imperva WAF which issues
+a JavaScript challenge to headless HTTP clients.  This module launches a real
+Chromium browser (headless) via Playwright, waits for the WAF challenge to
+resolve, and then extracts the session cookies and CSRF token needed for
+subsequent AJAX requests.
+
+Usage::
+
+    from dtek_client.browser_auth import get_cleared_cookies
+
+    cookies, csrf_token = await get_cleared_cookies(
+        "https://www.dtek-krem.com.ua/ua/shutdowns"
+    )
+"""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +27,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def get_cleared_cookies(url: str) -> Tuple[Dict[str, str], Optional[str]]:
+    """Launch a headless browser, wait for the WAF challenge to clear, and
+    return a tuple of ``(cookies, csrf_token)``.
+
+    Args:
+        url: the schedule page URL (e.g. "https://www.dtek-krem.com.ua/ua/shutdowns").
+
+    Returns:
+        A tuple of:
+            - ``cookies`` – dict of cookie name → value, ready to pass to curl_cffi.
+            - ``csrf_token`` – the Yii2 CSRF token from the page meta tag, or None.
+    """
     _LOGGER.info("Launching Playwright to bypass WAF for %s...", url)
 
     async with async_playwright() as p:
@@ -32,9 +58,11 @@ async def get_cleared_cookies(url: str) -> Tuple[Dict[str, str], Optional[str]]:
             await browser.close()
             raise DtekConnectionError(f"Failed to load page to bypass WAF: {e}")
 
+        # Allow extra time for the WAF JS challenge to complete.
         _LOGGER.debug("Waiting for WAF JS challenge to resolve...")
         await asyncio.sleep(4)
 
+        # Extract the Yii2 CSRF token from the page meta tag.
         csrf_token = await page.get_attribute('meta[name="csrf-token"]', "content")
         if csrf_token:
             _LOGGER.info("Successfully extracted CSRF token.")
