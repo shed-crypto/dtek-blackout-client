@@ -397,10 +397,10 @@ async def test_autocomplete_real() -> None:
             print(f"  Адреса:   {result.city}, {result.street}, {result.house_number}")
 
 async def main() -> None:
-    #await test_stub()   # Спочатку тестуємо стаб (швидко, без мережі)
+    await test_stub()   # Спочатку тестуємо стаб (швидко, без мережі)
     await test_krem()   # Тестуємо Київську область
     await test_oem()    # Тестуємо Одесу
-    #await test_autocomplete_stub() # Тестуємо автозавершення локально
-    #await test_autocomplete_real() # Тестуємо автозавершення онлайн
+    await test_autocomplete_stub() # Тестуємо автозавершення локально
+    await test_autocomplete_real() # Тестуємо автозавершення онлайн
 if __name__ == "__main__":
     asyncio.run(main())

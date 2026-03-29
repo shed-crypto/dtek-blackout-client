@@ -1,7 +1,6 @@
 # dtek-blackout-client
 
 > Async Python client for **DTEK** regional electricity-outage schedule sites  
-> Built to power the [Home Assistant DTEK integration](https://github.com/yourusername/ha-dtek).
 
 [![CI](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml/badge.svg)](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/dtek-blackout-client.svg)](https://pypi.org/project/dtek-blackout-client/)
@@ -45,7 +44,7 @@ Region names are also available programmatically — see `const.REGION_NAMES`,
 - ✅ **Auto-discovery** — finds the AJAX endpoint from `<meta name="ajaxUrl">` automatically; falls back through 5 regex patterns and a hardcoded path
 - ✅ **Typed** — every model uses `pydantic` v2 with strict validation; all models are `frozen=True`
 - ✅ **Resilient** — automatic retry with linear back-off on 5xx errors
-- ✅ **Stub included** — `StubDtekClient` lets teammates start coding immediately without network access
+- ✅ **Stub included** — `StubDtekClient` allows offline development without any network access
 - ✅ **Tested** — 90%+ coverage, all HTTP calls mocked; no internet required in CI
 
 ---
@@ -73,23 +72,23 @@ import asyncio
 from dtek_client import DtekClient
 
 async def main() -> None:
-    async with DtekClient("kem") as client:
+    async with DtekClient("krem") as client:
 
         # Get all streets in a city
-        streets = await client.get_streets("м. Україна")
+        streets = await client.get_streets("м. Українка")
         print([s.name for s in streets])
 
         # Get all houses + groups for a street
-        response = await client.get_home_num("м. Україна", "вул. Юності")
+        response = await client.get_home_num("м. Українка", "вул. Юності")
         for house, entry in sorted(response.houses.items()):
             status = "excluded" if entry.is_excluded else entry.primary_group
             print(f"  {house:6s} → {status}")
 
         # Find your group by address
         result = await client.get_group_by_address(
-            city="м. Україна",
+            city="м. Українка",
             street="вул. Юності",
-            house_number="10",
+            house_number="1",
         )
         print(result) 
 
@@ -290,16 +289,16 @@ slots = await client.get_today_schedule(
 ### Development stub
 
 ```python
-# Swap one line — teammates can start immediately without network access:
+# Swap one line — start immediately without network access:
 from dtek_client.stub_client import StubDtekClient as DtekClient
 
 # Everything else stays identical
-async with DtekClient("kem") as client:
-    result = await client.get_group_by_address("м. Україна", "вул. Юності", "10")
-    slots  = await client.get_today_schedule("м. Україна", "вул. Юності", "10")
+async with DtekClient("krem") as client:
+    result = await client.get_group_by_address("м. Українка", "вул. Юності", "1")
+    slots  = await client.get_today_schedule("м. Українка", "вул. Юності", "1")
 ```
 
-The stub returns realistic data for `м. Україна` / `м. Обухів` with groups
+The stub returns realistic data for `м. Українка` / `м. Обухів` with groups
 `GPV3.1`, `GPV3.2`, `GPV4.1` and a matching preset + today's fact schedule.
 
 ---
@@ -325,7 +324,7 @@ Total coverage: 99.83%
 
 ## License
 
-[MIT](LICENSE) © 2026 Your Name
+[MIT](LICENSE) © 2026 Rachenko
 
 ---
 ---
@@ -333,7 +332,6 @@ Total coverage: 99.83%
 # dtek-blackout-client
 
 > Асинхронний Python-клієнт для сайтів регіональних графіків відключень електроенергії **DTEK**  
-> Створено для роботи з [інтеграцією Home Assistant DTEK](https://github.com/yourusername/ha-dtek).
 
 [![CI](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml/badge.svg)](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/dtek-blackout-client.svg)](https://pypi.org/project/dtek-blackout-client/)
@@ -377,7 +375,7 @@ Total coverage: 99.83%
 - ✅ **Автовиявлення** — знаходить AJAX-ендпоінт з `<meta name="ajaxUrl">` автоматично; якщо не вдається — перебирає 5 регулярних виразів та хардкодений шлях
 - ✅ **Типізований** — усі моделі використовують `pydantic` v2 зі строгою валідацією; всі моделі — `frozen=True`
 - ✅ **Стійкий** — автоматичний повтор із лінійним відступом при помилках 5xx
-- ✅ **Стаб включено** — `StubDtekClient` дозволяє колегам починати розробку без доступу до мережі
+- ✅ **Стаб включено** — `StubDtekClient` дозволяє вести розробку офлайн без доступу до мережі
 - ✅ **Протестований** — покриття 90%+, всі HTTP-виклики замоковані; CI не потребує Інтернету
 
 ---
@@ -405,25 +403,25 @@ import asyncio
 from dtek_client import DtekClient
 
 async def main() -> None:
-    async with DtekClient("kem") as client:
+    async with DtekClient("krem") as client:
 
         # Отримати всі вулиці міста
-        streets = await client.get_streets("м. Україна")
+        streets = await client.get_streets("м. Українка")
         print([s.name for s in streets])
 
         # Отримати всі будинки + групи для вулиці
-        response = await client.get_home_num("м. Україна", "вул. Юності")
+        response = await client.get_home_num("м. Українка", "вул. Юності")
         for house, entry in sorted(response.houses.items()):
             status = "excluded" if entry.is_excluded else entry.primary_group
             print(f"  {house:6s} → {status}")
 
         # Знайти свою чергу за адресою
         result = await client.get_group_by_address(
-            city="м. Україна",
+            city="м. Українка",
             street="вул. Юності",
-            house_number="10",
+            house_number="1",
         )
-        print(result)  # м. Україна, вул. Юності, 10 → Черга 3.1
+        print(result)  # м. Українка, вул. Юності, 1 → Черга планових відключень 3.1
 
 asyncio.run(main())
 ```
@@ -623,16 +621,16 @@ slots = await client.get_today_schedule(
 ### Стаб для розробки
 
 ```python
-# Змініть один рядок — колеги можуть починати без доступу до мережі:
+# Змініть один рядок — починайте розробку офлайн без доступу до мережі:
 from dtek_client.stub_client import StubDtekClient as DtekClient
 
 # Все інше залишається ідентичним
-async with DtekClient("kem") as client:
-    result = await client.get_group_by_address("м. Україна", "вул. Юності", "10")
-    slots  = await client.get_today_schedule("м. Україна", "вул. Юності", "10")
+async with DtekClient("krem") as client:
+    result = await client.get_group_by_address("м. Українка", "вул. Юності", "1")
+    slots  = await client.get_today_schedule("м. Українка", "вул. Юності", "1")
 ```
 
-Стаб повертає реалістичні дані для `м. Україна` / `м. Обухів` з групами
+Стаб повертає реалістичні дані для `м. Українка` / `м. Обухів` з групами
 `GPV3.1`, `GPV3.2`, `GPV4.1` та відповідним preset + фактичним графіком на сьогодні.
 
 ---
@@ -658,4 +656,4 @@ Total coverage: 99.83%
 
 ## Ліцензія
 
-[MIT](LICENSE) © 2026 Your Name
+[MIT](LICENSE) © 2026 Rachenko
