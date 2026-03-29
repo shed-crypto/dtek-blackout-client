@@ -1,0 +1,179 @@
+classDiagram
+
+%% ── External interface ─────────────────────────────────────────────────────
+    class DtekClient {
+        +site_key: str
+        +base_url: str
+        +ajax_url: str | None
+        -_session: AsyncSession | None
+        -_ajax_url: str | None
+        -_owns_session: bool
+        -_global_schedule: dict | None
+        +__init__(site_key, ajax_url, timeout, retry_attempts, retry_delay, session)
+        +connect() None
+        +close() None
+        +get_streets(city) list[StreetSuggestion]
+        +get_home_num(city, street) HomeNumResponse
+        +get_group_by_address(city, street, house_number) AddressResult
+        +get_today_schedule(city, street, house_number) dict | None
+        -_get_ajax_url() str
+        -_fetch_page_html(path) str | None
+        -_post(data) Any
+        -_handle_response(response, url) Any
+        -_build_form(method, fields, update_fact) dict
+    }
+
+    class StubDtekClient {
+        +site_key: str
+        +base_url: str
+        +ajax_url: None
+        +connect() None
+        +close() None
+        +get_streets(city) list[StreetSuggestion]
+        +get_home_num(city, street) HomeNumResponse
+        +get_group_by_address(city, street, house_number) AddressResult
+        +get_today_schedule(city, street, house_number) dict | None
+    }
+
+%% ── Models ─────────────────────────────────────────────────────────────────
+    class SlotStatus {
+        <<enumeration>>
+        YES
+        NO
+        MAYBE
+        FIRST
+        SECOND
+        MFIRST
+        MSECOND
+        UNKNOWN
+        +has_outage: bool
+        +may_have_outage: bool
+    }
+
+    class WeekDaySchedule {
+        +slots: dict[str, SlotStatus]
+        +outage_slot_count: int
+        +has_any_outage: bool
+    }
+
+    class GroupWeekSchedule {
+        +group_id: str
+        +days: dict[int, WeekDaySchedule]
+        +get_day(dtek_weekday) WeekDaySchedule | None
+    }
+
+    class PresetSchedule {
+        +groups: dict[str, GroupWeekSchedule]
+        +time_zone: dict[str, str]
+        +sch_names: dict[str, str]
+        +days: dict[int, str]
+        +is_active: bool
+        +available_groups: list[str]
+    }
+
+    class FactDaySchedule {
+        +group_id: str
+        +day_ts: int
+        +slots: dict[str, SlotStatus]
+        +outage_slot_count: int
+        +has_any_outage: bool
+        +day_date: datetime
+    }
+
+    class FactSchedule {
+        +today_ts: int
+        +update: str | None
+        +days: dict
+        +get_group_today(group_id) dict | None
+        +get_group_day(ts, group_id) dict | None
+    }
+
+    class HouseEntry {
+        +house_number: str
+        +group_ids: list[str]
+        +sub_type: str
+        +start_date: str
+        +end_date: str
+        +outage_type: str
+        +voluntarily: bool | None
+        +is_multi_group: bool
+        +is_excluded: bool
+        +primary_group: str | None
+        +has_current_outage: bool
+    }
+
+    class HomeNumResponse {
+        +houses: dict[str, HouseEntry]
+        +preset: PresetSchedule | None
+        +fact: FactSchedule | None
+        +show_cur_schedule: bool
+        +show_table_plan: bool
+        +show_table_fact: bool
+        +show_table_schedule: bool
+        +update_timestamp: str | None
+        +get_group_for_house(house_number) str | None
+        +available_houses: list[str]
+    }
+
+    class StreetSuggestion {
+        +name: str
+    }
+
+    class AddressResult {
+        +site_key: str
+        +city: str
+        +street: str
+        +house_number: str
+        +group_id: str
+        +group_display_name: str
+    }
+
+%% ── Exceptions ─────────────────────────────────────────────────────────────
+    class DtekClientError {
+        +status_code: int | None
+    }
+    class DtekConnectionError
+    class DtekTimeoutError { +timeout: float }
+    class DtekSSLError
+    class DtekAPIError
+    class DtekUnauthorizedError
+    class DtekNotFoundError { +path: str }
+    class DtekRateLimitError { +retry_after: float | None }
+    class DtekServerError
+    class DtekDataError { +raw: object }
+    class DtekSiteError
+
+%% ── Relationships ───────────────────────────────────────────────────────────
+    DtekClient ..> HomeNumResponse : returns
+    DtekClient ..> StreetSuggestion : returns
+    DtekClient ..> AddressResult : returns
+    DtekClient ..> SlotStatus : returns (via dict)
+
+    StubDtekClient ..> HomeNumResponse : returns
+    StubDtekClient ..> StreetSuggestion : returns
+    StubDtekClient ..> AddressResult : returns
+
+    HomeNumResponse "1" o-- "0..*" HouseEntry : houses
+    HomeNumResponse "1" o-- "0..1" PresetSchedule : preset
+    HomeNumResponse "1" o-- "0..1" FactSchedule : fact
+
+    PresetSchedule "1" o-- "0..*" GroupWeekSchedule : groups
+    GroupWeekSchedule "1" o-- "0..7" WeekDaySchedule : days
+    WeekDaySchedule "1" o-- "0..48" SlotStatus : slots
+
+    FactSchedule "1" o-- "0..*" SlotStatus : days (nested)
+    FactDaySchedule "1" o-- "0..48" SlotStatus : slots
+
+    DtekClientError <|-- DtekConnectionError
+    DtekConnectionError <|-- DtekTimeoutError
+    DtekConnectionError <|-- DtekSSLError
+    DtekClientError <|-- DtekAPIError
+    DtekAPIError <|-- DtekUnauthorizedError
+    DtekAPIError <|-- DtekNotFoundError
+    DtekAPIError <|-- DtekRateLimitError
+    DtekAPIError <|-- DtekServerError
+    DtekClientError <|-- DtekDataError
+    DtekClientError <|-- DtekSiteError
+
+    DtekClient ..> DtekClientError : raises
+    StubDtekClient ..|> DtekClient : «same interface»
