@@ -18,15 +18,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, Optional, Tuple
 
-from playwright.async_api import async_playwright, Error as PlaywrightError
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import async_playwright
+
 from .exceptions import DtekConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def get_cleared_cookies(url: str) -> Tuple[Dict[str, str], Optional[str]]:
+async def get_cleared_cookies(url: str) -> tuple[dict[str, str], str | None]:
     """Launch a headless browser, wait for the WAF challenge to clear, and
     return a tuple of ``(cookies, csrf_token)``.
 
@@ -56,7 +57,7 @@ async def get_cleared_cookies(url: str) -> Tuple[Dict[str, str], Optional[str]]:
             await page.goto(url, wait_until="networkidle")
         except PlaywrightError as e:
             await browser.close()
-            raise DtekConnectionError(f"Failed to load page to bypass WAF: {e}")
+            raise DtekConnectionError(f"Failed to load page to bypass WAF: {e}") from e
 
         # Allow extra time for the WAF JS challenge to complete.
         _LOGGER.debug("Waiting for WAF JS challenge to resolve...")

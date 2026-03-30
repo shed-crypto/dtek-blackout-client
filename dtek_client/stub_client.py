@@ -42,7 +42,7 @@ __all__ = ["StubDtekClient"]
 _TIME_ZONE: dict[str, str] = {
     str(i): (
         f"{((i-1)*30)//60:02d}:{((i-1)*30)%60:02d}"
-        f"–{((i*30))//60:02d}:{((i*30))%60:02d}"
+        f"–{(i*30)//60:02d}:{(i*30)%60:02d}"
     )
     for i in range(1, 49)
 }
@@ -194,7 +194,7 @@ class StubDtekClient:
     async def close(self) -> None:
         """No-op — stub has no resources to release."""
 
-    async def __aenter__(self) -> "StubDtekClient":
+    async def __aenter__(self) -> StubDtekClient:
         return self
 
     async def __aexit__(

@@ -202,7 +202,7 @@ class DtekClient:
             await self._session.close()
             self._session = None
 
-    async def __aenter__(self) -> "DtekClient":
+    async def __aenter__(self) -> DtekClient:
         await self.connect()
         return self
 

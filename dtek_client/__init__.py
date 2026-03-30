@@ -3,7 +3,16 @@
 __version__ = "0.1.0"
 
 from .client import DtekClient
-from .stub_client import StubDtekClient
+from .exceptions import (
+    DtekAPIError,
+    DtekClientError,
+    DtekConnectionError,
+    DtekNotFoundError,
+    DtekRateLimitError,
+    DtekSiteError,
+    DtekTimeoutError,
+    DtekUnauthorizedError,
+)
 from .models import (
     AddressResult,
     FactDaySchedule,
@@ -16,16 +25,7 @@ from .models import (
     StreetSuggestion,
     WeekDaySchedule,
 )
-from .exceptions import (
-    DtekAPIError,
-    DtekClientError,
-    DtekConnectionError,
-    DtekNotFoundError,
-    DtekRateLimitError,
-    DtekSiteError,
-    DtekTimeoutError,
-    DtekUnauthorizedError,
-)
+from .stub_client import StubDtekClient
 
 __all__ = [
     "DtekClient",

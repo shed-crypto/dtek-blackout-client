@@ -19,8 +19,8 @@ All models are frozen=True — safe to pass between coroutines.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -36,7 +36,7 @@ class _FrozenModel(BaseModel):
 
 # ── Slot status enum ──────────────────────────────────────────────────────────
 
-class SlotStatus(str, Enum):
+class SlotStatus(StrEnum):
     """Possible status values for a time-slot cell in the DTEK schedule table."""
 
     YES = "yes"        # Electricity available — no outage
@@ -49,7 +49,7 @@ class SlotStatus(str, Enum):
     UNKNOWN = "unknown"  # Fallback for unrecognised values
 
     @classmethod
-    def _missing_(cls, value: object) -> "SlotStatus":
+    def _missing_(cls, value: object) -> SlotStatus:
         """Return UNKNOWN for any unrecognised slot value."""
         return cls.UNKNOWN
 
@@ -213,7 +213,7 @@ class FactDaySchedule(_FrozenModel):
     @property
     def day_date(self) -> datetime:
         """Return the day as a UTC datetime."""
-        return datetime.fromtimestamp(self.day_ts, tz=timezone.utc)
+        return datetime.fromtimestamp(self.day_ts, tz=UTC)
 
 
 class FactSchedule(_FrozenModel):
