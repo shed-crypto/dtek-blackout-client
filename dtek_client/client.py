@@ -27,6 +27,7 @@ Quick start::
         )
         print(result)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -154,8 +155,7 @@ class DtekClient:
     ) -> None:
         if site_key not in DTEK_SITES:
             raise DtekSiteError(
-                f"Unknown site_key {site_key!r}. "
-                f"Valid options: {sorted(DTEK_SITES.keys())}"
+                f"Unknown site_key {site_key!r}. " f"Valid options: {sorted(DTEK_SITES.keys())}"
             )
 
         self._site_key = site_key
@@ -280,7 +280,10 @@ class DtekClient:
                     ajax_url = _resolve_ajax_url(raw_url, self._base_url)
                     _LOGGER.info(
                         "Discovered ajaxUrl: %s (raw=%r, page=%s%s)",
-                        ajax_url, raw_url, self._base_url, path,
+                        ajax_url,
+                        raw_url,
+                        self._base_url,
+                        path,
                     )
                     self._ajax_url = ajax_url
                     self._schedule_path = path  # Cache the working path.
@@ -451,8 +454,7 @@ class DtekClient:
                         break
             if city_streets is None:
                 _LOGGER.warning(
-                    "getStreets: city %r not found in response. "
-                    "Available cities: %s",
+                    "getStreets: city %r not found in response. " "Available cities: %s",
                     city,
                     sorted(str(k) for k in streets_raw.keys()),
                 )
@@ -502,13 +504,13 @@ class DtekClient:
             if self._global_schedule is None:
                 try:
                     _LOGGER.debug("Fetching global schedule via checkDisconUpdate...")
-                    global_raw = await self._post({
-                        "method": "checkDisconUpdate",
-                        "update": "01.01.2000 00:00",
-                    })
-                    self._global_schedule = (
-                        global_raw if isinstance(global_raw, dict) else {}
+                    global_raw = await self._post(
+                        {
+                            "method": "checkDisconUpdate",
+                            "update": "01.01.2000 00:00",
+                        }
                     )
+                    self._global_schedule = global_raw if isinstance(global_raw, dict) else {}
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch global schedule: %s", exc)
                     self._global_schedule = {}
@@ -522,9 +524,7 @@ class DtekClient:
         try:
             return HomeNumResponse.model_validate(raw)
         except ValidationError as exc:
-            raise DtekDataError(
-                f"getHomeNum: response validation failed: {exc}", raw=raw
-            ) from exc
+            raise DtekDataError(f"getHomeNum: response validation failed: {exc}", raw=raw) from exc
 
     async def get_group_by_address(
         self,

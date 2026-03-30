@@ -1,4 +1,5 @@
 """Unit tests for dtek_client.models — no network required."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -22,6 +23,7 @@ from dtek_client.models import (
 
 
 # ── SlotStatus ────────────────────────────────────────────────────────────────
+
 
 class TestSlotStatus:
     def test_known_values_parse(self) -> None:
@@ -52,6 +54,7 @@ class TestSlotStatus:
 
 # ── WeekDaySchedule ───────────────────────────────────────────────────────────
 
+
 class TestWeekDaySchedule:
     def test_coerces_string_values(self) -> None:
         raw = {"1": "no", "2": "yes", "3": "maybe"}
@@ -80,6 +83,7 @@ class TestWeekDaySchedule:
 
 
 # ── HouseEntry ────────────────────────────────────────────────────────────────
+
 
 class TestHouseEntry:
     def test_single_group(self) -> None:
@@ -122,6 +126,7 @@ class TestHouseEntry:
 
 # ── HomeNumResponse parsing ───────────────────────────────────────────────────
 
+
 class TestHomeNumResponse:
     def test_parses_full_fixture(self, home_num_raw: dict) -> None:
         r = HomeNumResponse.model_validate(home_num_raw)
@@ -158,7 +163,7 @@ class TestHomeNumResponse:
         assert r.fact is not None
         slots = r.fact.get_group_today("GPV3.1")
         assert slots is not None
-        assert slots["1"] is SlotStatus.NO   # outage
+        assert slots["1"] is SlotStatus.NO  # outage
         assert slots["9"] is SlotStatus.YES  # electricity
         assert slots["17"] is SlotStatus.MAYBE
 
@@ -179,7 +184,16 @@ class TestHomeNumResponse:
     def test_result_false_still_parses(self) -> None:
         """HomeNumResponse can be built from raw dict even without result key."""
         raw: dict = {
-            "data": {"10": {"sub_type_reason": ["GPV3.1"], "sub_type": "", "start_date": "", "end_date": "", "type": "", "voluntarily": None}},
+            "data": {
+                "10": {
+                    "sub_type_reason": ["GPV3.1"],
+                    "sub_type": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "type": "",
+                    "voluntarily": None,
+                }
+            },
             "showCurSchedule": False,
             "showTablePlan": False,
             "showTableFact": False,
@@ -190,6 +204,7 @@ class TestHomeNumResponse:
 
 
 # ── PresetSchedule ────────────────────────────────────────────────────────────
+
 
 class TestPresetSchedule:
     def test_available_groups(self, home_num_raw: dict) -> None:
@@ -220,6 +235,7 @@ class TestPresetSchedule:
 
 # ── FactSchedule ─────────────────────────────────────────────────────────────
 
+
 class TestFactSchedule:
     def test_parses_raw(self, home_num_raw: dict) -> None:
         fact = FactSchedule.model_validate(home_num_raw["fact"])
@@ -249,12 +265,14 @@ class TestFactSchedule:
     def test_day_date_property(self, home_num_raw: dict) -> None:
         fact = FactSchedule.model_validate(home_num_raw["fact"])
         from datetime import datetime, timezone
+
         dt = datetime.fromtimestamp(fact.today_ts, tz=timezone.utc)
         assert dt.year == 2026
         assert dt.month == 3
 
 
 # ── AddressResult ─────────────────────────────────────────────────────────────
+
 
 class TestAddressResult:
     def test_str(self) -> None:
@@ -283,6 +301,7 @@ class TestAddressResult:
 
 # ── StreetSuggestion ──────────────────────────────────────────────────────────
 
+
 class TestStreetSuggestion:
     def test_str(self) -> None:
         s = StreetSuggestion(name="вул. Юності")
@@ -290,6 +309,7 @@ class TestStreetSuggestion:
 
 
 # ── WeekDaySchedule — validator guard ─────────────────────────────────────────
+
 
 class TestWeekDayScheduleValidatorGuard:
     def test_non_dict_input_raises(self) -> None:
@@ -300,6 +320,7 @@ class TestWeekDayScheduleValidatorGuard:
 
 
 # ── PresetSchedule — validator guards and skip logic ─────────────────────────
+
 
 class TestPresetScheduleValidatorGuards:
     def test_non_dict_input_raises(self) -> None:
@@ -327,7 +348,7 @@ class TestPresetScheduleValidatorGuards:
             "data": {
                 "GPV3.1": {
                     "monday": {"1": "no"},  # invalid — skipped
-                    "1": {"1": "yes"},      # valid
+                    "1": {"1": "yes"},  # valid
                 }
             },
             "time_zone": {"1": "00:00-00:30"},
@@ -340,6 +361,7 @@ class TestPresetScheduleValidatorGuards:
 
 
 # ── FactDaySchedule — computed properties ────────────────────────────────────
+
 
 class TestFactDayScheduleProperties:
     """FactDaySchedule is an internal model that the fact-schedule parser builds
@@ -367,6 +389,7 @@ class TestFactDayScheduleProperties:
 
 
 # ── FactSchedule — validator guards and lookup edge cases ─────────────────────
+
 
 class TestFactScheduleValidatorGuards:
     def test_non_dict_input_raises(self) -> None:
@@ -410,6 +433,7 @@ class TestFactScheduleValidatorGuards:
 
 # ── HouseEntry.__str__() — multi-group branch ─────────────────────────────────
 
+
 class TestHouseEntryStr:
     def test_str_for_multi_group_house_lists_all_group_ids(self) -> None:
         """A house that belongs to more than one group shows all group IDs
@@ -423,6 +447,7 @@ class TestHouseEntryStr:
 
 # ── HomeNumResponse — validator guards ────────────────────────────────────────
 
+
 class TestHomeNumResponseValidatorGuards:
     def test_non_dict_input_raises(self) -> None:
         """Non-dict input passed to model_validate triggers a ValidationError
@@ -435,8 +460,10 @@ class TestHomeNumResponseValidatorGuards:
         is skipped; the house is simply absent from the result."""
         raw: dict = {
             "data": {"99": "not_a_dict"},
-            "showCurSchedule": False, "showTablePlan": False,
-            "showTableFact": False, "showTableSchedule": False,
+            "showCurSchedule": False,
+            "showTablePlan": False,
+            "showTableFact": False,
+            "showTableSchedule": False,
         }
         r = HomeNumResponse.model_validate(raw)
         assert "99" not in r.houses

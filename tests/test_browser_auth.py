@@ -3,6 +3,7 @@
 Playwright is mocked entirely — no real browser is launched.
 Each test verifies one observable behaviour of get_cleared_cookies().
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,6 +17,7 @@ from dtek_client.exceptions import DtekConnectionError
 
 # ── Fixture helpers ───────────────────────────────────────────────────────────
 
+
 def _make_playwright_stack(
     csrf_token: str | None = "test-csrf-token",
     cookies: list[dict] | None = None,
@@ -28,20 +30,20 @@ def _make_playwright_stack(
     if cookies is None:
         cookies = [
             {"name": "visid_incap_1", "value": "abc123"},
-            {"name": "sessionid",     "value": "sess_xyz"},
+            {"name": "sessionid", "value": "sess_xyz"},
         ]
 
     page = MagicMock()
-    page.goto          = AsyncMock()
+    page.goto = AsyncMock()
     page.get_attribute = AsyncMock(return_value=csrf_token)
 
     browser_context = MagicMock()
     browser_context.new_page = AsyncMock(return_value=page)
-    browser_context.cookies  = AsyncMock(return_value=cookies)
+    browser_context.cookies = AsyncMock(return_value=cookies)
 
     browser = MagicMock()
     browser.new_context = AsyncMock(return_value=browser_context)
-    browser.close       = AsyncMock()
+    browser.close = AsyncMock()
 
     chromium = MagicMock()
     chromium.launch = AsyncMock(return_value=browser)
@@ -51,12 +53,13 @@ def _make_playwright_stack(
 
     pw_cm = MagicMock()
     pw_cm.__aenter__ = AsyncMock(return_value=playwright)
-    pw_cm.__aexit__  = AsyncMock(return_value=None)
+    pw_cm.__aexit__ = AsyncMock(return_value=None)
 
     return pw_cm, page, browser_context, browser
 
 
 # ── Return-value contract ─────────────────────────────────────────────────────
+
 
 class TestReturnValues:
     async def test_csrf_token_is_returned_when_found(self) -> None:
@@ -66,7 +69,7 @@ class TestReturnValues:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             _, csrf = await get_cleared_cookies("https://www.dtek-krem.com.ua/ua/shutdowns")
 
@@ -79,7 +82,7 @@ class TestReturnValues:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             _, csrf = await get_cleared_cookies("https://example.com")
 
@@ -91,13 +94,13 @@ class TestReturnValues:
         pw_cm, *_ = _make_playwright_stack(
             cookies=[
                 {"name": "incap_ses_1", "value": "sess_val"},
-                {"name": "PHPSESSID",   "value": "php_val"},
+                {"name": "PHPSESSID", "value": "php_val"},
             ]
         )
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             cookies, _ = await get_cleared_cookies("https://example.com")
 
@@ -110,7 +113,7 @@ class TestReturnValues:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             cookies, _ = await get_cleared_cookies("https://example.com")
 
@@ -122,7 +125,7 @@ class TestReturnValues:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             result = await get_cleared_cookies("https://example.com")
 
@@ -133,6 +136,7 @@ class TestReturnValues:
 
 # ── Playwright interaction contract ───────────────────────────────────────────
 
+
 class TestPlaywrightInteractions:
     async def test_browser_launched_in_headless_mode(self) -> None:
         """Chromium must always be launched headless so the helper can run
@@ -141,13 +145,11 @@ class TestPlaywrightInteractions:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             await get_cleared_cookies("https://example.com")
 
-        pw_cm.__aenter__.return_value.chromium.launch.assert_awaited_once_with(
-            headless=True
-        )
+        pw_cm.__aenter__.return_value.chromium.launch.assert_awaited_once_with(headless=True)
 
     async def test_page_navigates_to_the_provided_url(self) -> None:
         """page.goto must be called with the exact URL supplied by the caller
@@ -157,7 +159,7 @@ class TestPlaywrightInteractions:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             await get_cleared_cookies(url)
 
@@ -170,13 +172,11 @@ class TestPlaywrightInteractions:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             await get_cleared_cookies("https://example.com")
 
-        page.get_attribute.assert_awaited_once_with(
-            'meta[name="csrf-token"]', "content"
-        )
+        page.get_attribute.assert_awaited_once_with('meta[name="csrf-token"]', "content")
 
     async def test_waf_delay_is_awaited_once(self) -> None:
         """asyncio.sleep(4) is called once to give the Incapsula/Imperva
@@ -186,7 +186,7 @@ class TestPlaywrightInteractions:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=sleep_mock),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=sleep_mock),
         ):
             await get_cleared_cookies("https://example.com")
 
@@ -199,7 +199,7 @@ class TestPlaywrightInteractions:
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep",    new=AsyncMock()),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             await get_cleared_cookies("https://example.com")
 
@@ -219,7 +219,9 @@ class TestPlaywrightInteractions:
             patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             # Verify that the script will throw our error with the correct text
-            with pytest.raises(DtekConnectionError, match=f"Failed to load page to bypass WAF: {error_msg}"):
+            with pytest.raises(
+                DtekConnectionError, match=f"Failed to load page to bypass WAF: {error_msg}"
+            ):
                 await get_cleared_cookies("https://example.com")
 
         # Let's check that we didn't forget to close the browser before throwing an error!

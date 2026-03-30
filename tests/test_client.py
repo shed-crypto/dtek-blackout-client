@@ -1,4 +1,5 @@
 """Unit tests for DtekClient — all HTTP calls are mocked."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -22,6 +23,7 @@ from tests.conftest import make_mock_response
 
 
 # ── Constructor ───────────────────────────────────────────────────────────────
+
 
 class TestConstructor:
     def test_valid_site_key(self) -> None:
@@ -56,17 +58,16 @@ class TestConstructor:
 
 # ── ajaxUrl discovery ─────────────────────────────────────────────────────────
 
+
 class TestAjaxUrlDiscovery:
     async def test_extracts_meta_tag(self, mock_session: MagicMock) -> None:
         """Discovers ajaxUrl from <meta name="ajaxUrl" content="...">."""
         html = (
-            '<html><head>'
+            "<html><head>"
             '<meta name="ajaxUrl" content="https://www.dtek-kem.com.ua/ua/ajax">'
-            '</head></html>'
+            "</head></html>"
         )
-        mock_session.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text=html)
-        )
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=200, text=html))
         client = DtekClient("kem", session=mock_session)
         url = await client._get_ajax_url()
         assert url == "https://www.dtek-kem.com.ua/ua/ajax"
@@ -74,9 +75,7 @@ class TestAjaxUrlDiscovery:
     async def test_extracts_meta_reversed_attrs(self, mock_session: MagicMock) -> None:
         """content attr before name attr should still work."""
         html = '<meta content="https://example.com/ajax" name="ajaxUrl">'
-        mock_session.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text=html)
-        )
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=200, text=html))
         client = DtekClient("kem", session=mock_session)
         url = await client._get_ajax_url()
         assert url == "https://example.com/ajax"
@@ -84,9 +83,7 @@ class TestAjaxUrlDiscovery:
     async def test_resolves_relative_ajax_url(self, mock_session: MagicMock) -> None:
         """A relative path in the meta tag is resolved against base_url."""
         html = '<meta name="ajaxUrl" content="/ua/ajax">'
-        mock_session.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text=html)
-        )
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=200, text=html))
         client = DtekClient("kem", session=mock_session)
         url = await client._get_ajax_url()
         assert url == "https://www.dtek-kem.com.ua/ua/ajax"
@@ -94,9 +91,7 @@ class TestAjaxUrlDiscovery:
     async def test_meta_not_found_uses_fallback(self, mock_session: MagicMock) -> None:
         """When no meta tag is found, the client falls back to base_url + /ua/ajax."""
         html = "<html><body>No meta here</body></html>"
-        mock_session.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text=html)
-        )
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=200, text=html))
         client = DtekClient("kem", session=mock_session)
         url = await client._get_ajax_url()
         # Fallback URL = base_url + /ua/ajax
@@ -105,9 +100,7 @@ class TestAjaxUrlDiscovery:
     async def test_ajax_url_cached(self, mock_session: MagicMock) -> None:
         """Second call must NOT make a second HTTP request."""
         html = '<meta name="ajaxUrl" content="https://example.com/ajax">'
-        mock_session.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text=html)
-        )
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=200, text=html))
         client = DtekClient("kem", session=mock_session)
         await client._get_ajax_url()
         await client._get_ajax_url()
@@ -123,15 +116,14 @@ class TestAjaxUrlDiscovery:
     async def test_extracts_js_var_pattern(self, mock_session: MagicMock) -> None:
         """Discovers ajaxUrl from a JS variable: var ajaxUrl = "..."."""
         html = '<script>var ajaxUrl = "https://example.com/wp-admin/admin-ajax.php";</script>'
-        mock_session.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text=html)
-        )
+        mock_session.get = AsyncMock(return_value=make_mock_response(status_code=200, text=html))
         client = DtekClient("kem", session=mock_session)
         url = await client._get_ajax_url()
         assert url == "https://example.com/wp-admin/admin-ajax.php"
 
 
 # ── _build_form ────────────────────────────────────────────────────────────────
+
 
 class TestBuildForm:
     def test_simple(self) -> None:
@@ -166,6 +158,7 @@ class TestBuildForm:
 
 # ── _handle_response ──────────────────────────────────────────────────────────
 # NOTE: _handle_response is a synchronous method (no await needed).
+
 
 class TestHandleResponse:
     def _mock_resp(
@@ -227,6 +220,7 @@ class TestHandleResponse:
 
 # ── get_streets ────────────────────────────────────────────────────────────────
 
+
 class TestGetStreets:
     async def test_success_dict_format(
         self, client_with_ajax: DtekClient, streets_raw: dict
@@ -237,10 +231,12 @@ class TestGetStreets:
         assert all(isinstance(s.name, str) and len(s.name) > 0 for s in streets)
 
     async def test_success_list_format(self, client_with_ajax: DtekClient) -> None:
-        client_with_ajax._post = AsyncMock(return_value={  # type: ignore[method-assign]
-            "result": True,
-            "data": ["вул. А", "вул. Б"],
-        })
+        client_with_ajax._post = AsyncMock(
+            return_value={  # type: ignore[method-assign]
+                "result": True,
+                "data": ["вул. А", "вул. Б"],
+            }
+        )
         streets = await client_with_ajax.get_streets("м. Тест")
         assert len(streets) == 2
 
@@ -255,19 +251,20 @@ class TestGetStreets:
         assert streets == []
 
     async def test_city_not_found_returns_empty(self, client_with_ajax: DtekClient) -> None:
-        client_with_ajax._post = AsyncMock(return_value={  # type: ignore[method-assign]
-            "streets": {"м. Інше": ["вул. Центральна"]},
-        })
+        client_with_ajax._post = AsyncMock(
+            return_value={  # type: ignore[method-assign]
+                "streets": {"м. Інше": ["вул. Центральна"]},
+            }
+        )
         streets = await client_with_ajax.get_streets("м. Невідоме")
         assert streets == []
 
 
 # ── get_home_num ──────────────────────────────────────────────────────────────
 
+
 class TestGetHomeNum:
-    async def test_success(
-        self, client_with_ajax: DtekClient, home_num_raw: dict
-    ) -> None:
+    async def test_success(self, client_with_ajax: DtekClient, home_num_raw: dict) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
         result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
         assert isinstance(result, HomeNumResponse)
@@ -278,17 +275,13 @@ class TestGetHomeNum:
         with pytest.raises(DtekDataError):
             await client_with_ajax.get_home_num("м. Тест", "вул. Тест")
 
-    async def test_preset_parsed(
-        self, client_with_ajax: DtekClient, home_num_raw: dict
-    ) -> None:
+    async def test_preset_parsed(self, client_with_ajax: DtekClient, home_num_raw: dict) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
         result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
         assert result.preset is not None
         assert "GPV3.1" in result.preset.groups
 
-    async def test_fact_parsed(
-        self, client_with_ajax: DtekClient, home_num_raw: dict
-    ) -> None:
+    async def test_fact_parsed(self, client_with_ajax: DtekClient, home_num_raw: dict) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
         result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
         assert result.fact is not None
@@ -297,14 +290,11 @@ class TestGetHomeNum:
 
 # ── get_group_by_address ──────────────────────────────────────────────────────
 
+
 class TestGetGroupByAddress:
-    async def test_success(
-        self, client_with_ajax: DtekClient, home_num_raw: dict
-    ) -> None:
+    async def test_success(self, client_with_ajax: DtekClient, home_num_raw: dict) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        result = await client_with_ajax.get_group_by_address(
-            "м. Українка", "вул. Юності", "1"
-        )
+        result = await client_with_ajax.get_group_by_address("м. Українка", "вул. Юності", "1")
         assert isinstance(result, AddressResult)
         assert result.group_id == "GPV3.1"
         assert result.house_number == "1"
@@ -314,17 +304,13 @@ class TestGetGroupByAddress:
     ) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
         with pytest.raises(DtekNotFoundError):
-            await client_with_ajax.get_group_by_address(
-                "м. Українка", "вул. Юності", "999"
-            )
+            await client_with_ajax.get_group_by_address("м. Українка", "вул. Юності", "999")
 
     async def test_group_display_name_populated(
         self, client_with_ajax: DtekClient, home_num_raw: dict
     ) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        result = await client_with_ajax.get_group_by_address(
-            "м. Українка", "вул. Юності", "1"
-        )
+        result = await client_with_ajax.get_group_by_address("м. Українка", "вул. Юності", "1")
         assert isinstance(result.group_display_name, str)
         assert len(result.group_display_name) > 0
 
@@ -332,9 +318,7 @@ class TestGetGroupByAddress:
         self, client_with_ajax: DtekClient, home_num_raw: dict
     ) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        result = await client_with_ajax.get_group_by_address(
-            "м. Українка", "вул. Юності", "2"
-        )
+        result = await client_with_ajax.get_group_by_address("м. Українка", "вул. Юності", "2")
         assert result.site_key == "kem"
         assert result.city == "м. Українка"
         assert result.street == "вул. Юності"
@@ -343,14 +327,11 @@ class TestGetGroupByAddress:
 
 # ── get_today_schedule ────────────────────────────────────────────────────────
 
+
 class TestGetTodaySchedule:
-    async def test_returns_slot_map(
-        self, client_with_ajax: DtekClient, home_num_raw: dict
-    ) -> None:
+    async def test_returns_slot_map(self, client_with_ajax: DtekClient, home_num_raw: dict) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        slots = await client_with_ajax.get_today_schedule(
-            "м. Українка", "вул. Юності", "1"
-        )
+        slots = await client_with_ajax.get_today_schedule("м. Українка", "вул. Юності", "1")
         assert slots is not None
         assert slots["1"] is SlotStatus.NO
 
@@ -358,9 +339,7 @@ class TestGetTodaySchedule:
         self, client_with_ajax: DtekClient, home_num_raw: dict
     ) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        result = await client_with_ajax.get_today_schedule(
-            "м. Українка", "вул. Юності", "999"
-        )
+        result = await client_with_ajax.get_today_schedule("м. Українка", "вул. Юності", "999")
         assert result is None
 
     async def test_no_fact_returns_none(self, client_with_ajax: DtekClient) -> None:
@@ -369,32 +348,34 @@ class TestGetTodaySchedule:
             "data": {
                 "1": {
                     "sub_type_reason": ["GPV3.1"],
-                    "sub_type": "", "start_date": "", "end_date": "",
-                    "type": "", "voluntarily": None,
+                    "sub_type": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "type": "",
+                    "voluntarily": None,
                 }
             },
-            "showCurSchedule": False, "showTablePlan": False,
-            "showTableFact": False, "showTableSchedule": False,
+            "showCurSchedule": False,
+            "showTablePlan": False,
+            "showTableFact": False,
+            "showTableSchedule": False,
         }
         client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
-        result = await client_with_ajax.get_today_schedule(
-            "м. Українка", "вул. Юності", "1"
-        )
+        result = await client_with_ajax.get_today_schedule("м. Українка", "вул. Юності", "1")
         assert result is None
 
     async def test_slot_values_are_slot_status(
         self, client_with_ajax: DtekClient, home_num_raw: dict
     ) -> None:
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        slots = await client_with_ajax.get_today_schedule(
-            "м. Українка", "вул. Юності", "1"
-        )
+        slots = await client_with_ajax.get_today_schedule("м. Українка", "вул. Юності", "1")
         assert slots is not None
         for v in slots.values():
             assert isinstance(v, SlotStatus)
 
 
 # ── Session lifecycle ─────────────────────────────────────────────────────────
+
 
 class TestSessionLifecycle:
     async def test_no_session_raises_on_post(self) -> None:
@@ -403,9 +384,7 @@ class TestSessionLifecycle:
         with pytest.raises(DtekConnectionError):
             await client._post({"method": "test"})
 
-    async def test_close_injected_session_is_noop(
-        self, mock_session: MagicMock
-    ) -> None:
+    async def test_close_injected_session_is_noop(self, mock_session: MagicMock) -> None:
         """close() must NOT close an externally injected session."""
         client = DtekClient("kem", session=mock_session)
         await client.close()
@@ -416,9 +395,7 @@ class TestSessionLifecycle:
         mock_sess = MagicMock()
         mock_sess.close = AsyncMock()
         # Warm-up GET during connect().
-        mock_sess.get = AsyncMock(
-            return_value=make_mock_response(status_code=200, text="")
-        )
+        mock_sess.get = AsyncMock(return_value=make_mock_response(status_code=200, text=""))
 
         with patch("dtek_client.client.AsyncSession", return_value=mock_sess):
             async with DtekClient("kem", ajax_url="https://x.com/ajax") as client:
@@ -426,7 +403,9 @@ class TestSessionLifecycle:
 
         mock_sess.close.assert_called_once()
 
+
 # ── connect() warm-up GET ─────────────────────────────────────────────────────
+
 
 class TestConnectWarmUp:
     async def test_warmup_failure_does_not_propagate(self) -> None:
@@ -445,6 +424,7 @@ class TestConnectWarmUp:
 
 # ── _fetch_page_html() ────────────────────────────────────────────────────────
 
+
 class TestFetchPageHtml:
     async def test_404_returns_none(self, mock_session: MagicMock) -> None:
         """A 404 response is treated as 'path not found' and returns None
@@ -462,9 +442,7 @@ class TestFetchPageHtml:
             await client._fetch_page_html("/ua/shutdowns")
         assert ei.value.status_code == 503
 
-    async def test_network_error_raises_connection_error(
-        self, mock_session: MagicMock
-    ) -> None:
+    async def test_network_error_raises_connection_error(self, mock_session: MagicMock) -> None:
         """A curl_cffi RequestsError (e.g. DNS failure, connection refused)
         is wrapped in DtekConnectionError with the original message preserved."""
         from curl_cffi.requests.errors import RequestsError
@@ -474,17 +452,11 @@ class TestFetchPageHtml:
         with pytest.raises(DtekConnectionError):
             await client._fetch_page_html("/ua/shutdowns")
 
-    async def test_incapsula_waf_page_returns_none(
-        self, mock_session: MagicMock
-    ) -> None:
+    async def test_incapsula_waf_page_returns_none(self, mock_session: MagicMock) -> None:
         """When the schedule page is an Incapsula/Imperva JS challenge (recognisable
         by the _Incapsula_Resource marker), it is treated like a missing page so
         the client falls through to the next discovery path."""
-        waf_html = (
-            "<html><body>"
-            "var _Incapsula_Resource = {};"
-            "</body></html>"
-        )
+        waf_html = "<html><body>" "var _Incapsula_Resource = {};" "</body></html>"
         mock_session.get = AsyncMock(
             return_value=make_mock_response(status_code=200, text=waf_html)
         )
@@ -506,16 +478,15 @@ class TestFetchPageHtml:
 
 # ── _get_ajax_url() — fallback path iteration ─────────────────────────────────
 
+
 class TestAjaxUrlFallbackIteration:
     async def test_skips_404_path_and_uses_next(self, mock_session: MagicMock) -> None:
         """When the primary schedule path returns 404, the client moves on to
         the next fallback path and extracts the ajaxUrl from there."""
-        good_html = (
-            '<meta name="ajaxUrl" content="https://www.dtek-kem.com.ua/ua/ajax">'
-        )
+        good_html = '<meta name="ajaxUrl" content="https://www.dtek-kem.com.ua/ua/ajax">'
         mock_session.get = AsyncMock(
             side_effect=[
-                make_mock_response(status_code=404),           # primary → skip
+                make_mock_response(status_code=404),  # primary → skip
                 make_mock_response(status_code=200, text=good_html),  # fallback → found
             ]
         )
@@ -526,10 +497,9 @@ class TestAjaxUrlFallbackIteration:
 
 # ── _post() — retry logic ─────────────────────────────────────────────────────
 
+
 class TestPostRetry:
-    async def test_retries_on_server_error_then_succeeds(
-        self, mock_session: MagicMock
-    ) -> None:
+    async def test_retries_on_server_error_then_succeeds(self, mock_session: MagicMock) -> None:
         """On a 5xx response the client sleeps and retries; a successful response
         on the next attempt is returned normally."""
         mock_session.post = AsyncMock(
@@ -566,9 +536,7 @@ class TestPostRetry:
             with pytest.raises(DtekServerError):
                 await client._post({"method": "test"})
 
-    async def test_unauthorized_is_not_retried(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_unauthorized_is_not_retried(self, client_with_ajax: DtekClient) -> None:
         """401 responses are not transient — re-raise immediately without retry."""
         client_with_ajax._session.post = AsyncMock(  # type: ignore[union-attr]
             return_value=make_mock_response(status_code=401)
@@ -576,9 +544,7 @@ class TestPostRetry:
         with pytest.raises(DtekUnauthorizedError):
             await client_with_ajax._post({"method": "test"})
 
-    async def test_rate_limit_is_not_retried(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_rate_limit_is_not_retried(self, client_with_ajax: DtekClient) -> None:
         """429 responses are not retried — the caller should honour Retry-After."""
         client_with_ajax._session.post = AsyncMock(  # type: ignore[union-attr]
             return_value=make_mock_response(status_code=429)
@@ -586,9 +552,7 @@ class TestPostRetry:
         with pytest.raises(DtekRateLimitError):
             await client_with_ajax._post({"method": "test"})
 
-    async def test_not_found_is_not_retried(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_not_found_is_not_retried(self, client_with_ajax: DtekClient) -> None:
         """404 from the AJAX endpoint means the resource genuinely does not exist
         and should not be retried."""
         client_with_ajax._session.post = AsyncMock(  # type: ignore[union-attr]
@@ -600,10 +564,9 @@ class TestPostRetry:
 
 # ── _handle_response() — Retry-After edge case ────────────────────────────────
 
+
 class TestHandleResponseRetryAfterHeader:
-    def test_non_numeric_retry_after_is_treated_as_none(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    def test_non_numeric_retry_after_is_treated_as_none(self, client_with_ajax: DtekClient) -> None:
         """When Retry-After contains an HTTP-date string rather than a number
         of seconds, parsing fails gracefully and retry_after is left as None."""
         resp = make_mock_response(
@@ -617,10 +580,9 @@ class TestHandleResponseRetryAfterHeader:
 
 # ── get_streets() — edge cases ────────────────────────────────────────────────
 
+
 class TestGetStreetsEdgeCases:
-    async def test_case_insensitive_city_lookup(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_case_insensitive_city_lookup(self, client_with_ajax: DtekClient) -> None:
         """City keys in the AJAX response may use different capitalisation than
         the user's query; the client falls back to a case-insensitive comparison."""
         client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
@@ -629,9 +591,7 @@ class TestGetStreetsEdgeCases:
         streets = await client_with_ajax.get_streets("м. Українка")
         assert len(streets) == 2
 
-    async def test_city_value_not_a_list_returns_empty(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_city_value_not_a_list_returns_empty(self, client_with_ajax: DtekClient) -> None:
         """If the server sends a city entry whose value is not a list (malformed
         response), the method returns an empty list rather than crashing."""
         client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
@@ -666,7 +626,9 @@ class TestGetStreetsEdgeCases:
         assert len(streets) == 2
         assert streets[0].name == "вул. Юності"
 
+
 # ── get_home_num() — global schedule fallback ─────────────────────────────────
+
 
 class TestGetHomeNumGlobalSchedule:
     """When the getHomeNum response contains no preset/fact, the client fetches
@@ -677,12 +639,17 @@ class TestGetHomeNumGlobalSchedule:
             "data": {
                 "1": {
                     "sub_type_reason": ["GPV3.1"],
-                    "sub_type": "", "start_date": "", "end_date": "",
-                    "type": "", "voluntarily": None,
+                    "sub_type": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "type": "",
+                    "voluntarily": None,
                 }
             },
-            "showCurSchedule": False, "showTablePlan": False,
-            "showTableFact": False, "showTableSchedule": False,
+            "showCurSchedule": False,
+            "showTablePlan": False,
+            "showTableFact": False,
+            "showTableSchedule": False,
         }
 
     async def test_global_schedule_merged_when_present(
@@ -741,16 +708,16 @@ class TestGetHomeNumGlobalSchedule:
         result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
         assert result.preset is None
 
-    async def test_validation_error_raises_data_error(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_validation_error_raises_data_error(self, client_with_ajax: DtekClient) -> None:
         """When the AJAX response cannot be parsed into HomeNumResponse (e.g.
         preset is a string instead of an object), a DtekDataError is raised."""
         raw: dict[str, Any] = {
             "data": {},
             "preset": "not_an_object",
-            "showCurSchedule": False, "showTablePlan": False,
-            "showTableFact": False, "showTableSchedule": False,
+            "showCurSchedule": False,
+            "showTablePlan": False,
+            "showTableFact": False,
+            "showTableSchedule": False,
         }
         client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
         with pytest.raises(DtekDataError):

@@ -13,6 +13,7 @@ Hierarchy:
     ├── DtekDataError                (response cannot be parsed)
     └── DtekSiteError                (site configuration / meta discovery issue)
 """
+
 from __future__ import annotations
 
 
@@ -33,6 +34,7 @@ class DtekClientError(Exception):
 
 # ── Network / Connectivity ────────────────────────────────────────────────────
 
+
 class DtekConnectionError(DtekClientError):
     """Raised when a network-level error prevents reaching the ДТЕК site."""
 
@@ -50,6 +52,7 @@ class DtekSSLError(DtekConnectionError):
 
 
 # ── API / HTTP ────────────────────────────────────────────────────────────────
+
 
 class DtekAPIError(DtekClientError):
     """Raised when the site returns a non-2xx HTTP status code."""
@@ -94,6 +97,7 @@ class DtekServerError(DtekAPIError):
 
 # ── Data / Parsing ────────────────────────────────────────────────────────────
 
+
 class DtekDataError(DtekClientError):
     """Raised when an AJAX response cannot be parsed into the expected models."""
 
@@ -103,6 +107,7 @@ class DtekDataError(DtekClientError):
 
 
 # ── Site Configuration ────────────────────────────────────────────────────────
+
 
 class DtekSiteError(DtekClientError):
     """Raised when the ajaxUrl cannot be discovered from the site page,

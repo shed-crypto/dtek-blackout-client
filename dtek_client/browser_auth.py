@@ -14,6 +14,7 @@ Usage::
         "https://www.dtek-krem.com.ua/ua/shutdowns"
     )
 """
+
 from __future__ import annotations
 
 import asyncio

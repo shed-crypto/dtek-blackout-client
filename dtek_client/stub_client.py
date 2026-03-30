@@ -18,6 +18,7 @@ Swap one import line in your HA code::
 The interface is 100% identical.  When the real client is ready,
 revert that one import — nothing else changes.
 """
+
 from __future__ import annotations
 
 from types import TracebackType
@@ -40,10 +41,7 @@ __all__ = ["StubDtekClient"]
 # ── Hardcoded time-zone labels ────────────────────────────────────────────────
 
 _TIME_ZONE: dict[str, str] = {
-    str(i): (
-        f"{((i-1)*30)//60:02d}:{((i-1)*30)%60:02d}"
-        f"–{(i*30)//60:02d}:{(i*30)%60:02d}"
-    )
+    str(i): (f"{((i-1)*30)//60:02d}:{((i-1)*30)%60:02d}" f"–{(i*30)//60:02d}:{(i*30)%60:02d}")
     for i in range(1, 49)
 }
 # Slot 48 ends at 24:00, not 00:00.
@@ -64,10 +62,7 @@ _PATTERNS: dict[str, set[str]] = {
 
 def _make_week_day(outage_slots: set[str]) -> WeekDaySchedule:
     """Build a WeekDaySchedule from a set of outage slot keys."""
-    slots = {
-        k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES)
-        for k in _TIME_ZONE
-    }
+    slots = {k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES) for k in _TIME_ZONE}
     return WeekDaySchedule(slots=slots)
 
 
@@ -77,9 +72,7 @@ def _make_preset() -> PresetSchedule:
     for group_id, pattern in _PATTERNS.items():
         days = {d: _make_week_day(pattern) for d in range(1, 8)}
         # Use model_construct to bypass model_validator (expects raw AJAX dict).
-        groups[group_id] = GroupWeekSchedule.model_construct(
-            group_id=group_id, days=days
-        )
+        groups[group_id] = GroupWeekSchedule.model_construct(group_id=group_id, days=days)
 
     return PresetSchedule.model_construct(
         groups=groups,
@@ -90,8 +83,13 @@ def _make_preset() -> PresetSchedule:
             "GPV4.1": "Черга планових відключень 4.1",
         },
         days={
-            1: "Понеділок", 2: "Вівторок", 3: "Середа", 4: "Четвер",
-            5: "П'ятниця", 6: "Субота", 7: "Неділя",
+            1: "Понеділок",
+            2: "Вівторок",
+            3: "Середа",
+            4: "Четвер",
+            5: "П'ятниця",
+            6: "Субота",
+            7: "Неділя",
         },
         is_active=True,
     )
@@ -99,10 +97,7 @@ def _make_preset() -> PresetSchedule:
 
 def _make_fact(today_ts: int, group_id: str, outage_slots: set[str]) -> FactSchedule:
     """Build a FactSchedule stub for today."""
-    slots = {
-        k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES)
-        for k in _TIME_ZONE
-    }
+    slots = {k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES) for k in _TIME_ZONE}
     # Use model_construct to bypass model_validator (expects raw AJAX dict).
     return FactSchedule.model_construct(
         today_ts=today_ts,
@@ -115,25 +110,33 @@ def _make_fact(today_ts: int, group_id: str, outage_slots: set[str]) -> FactSche
 
 _STREETS: dict[str, dict[str, list[str]]] = {
     "м. Українка": {
-        "вул. Юності":       ["1", "2", "3", "5", "7", "9", "11", "12", "14"],
-        "вул. Садова":       ["1", "1А", "2", "2А", "3"],
-        "вул. Паркова":      ["1", "2", "4", "6", "8", "10"],
-        "пр. Незалежності":  ["1", "1/1", "2", "3", "4", "5"],
+        "вул. Юності": ["1", "2", "3", "5", "7", "9", "11", "12", "14"],
+        "вул. Садова": ["1", "1А", "2", "2А", "3"],
+        "вул. Паркова": ["1", "2", "4", "6", "8", "10"],
+        "пр. Незалежності": ["1", "1/1", "2", "3", "4", "5"],
     },
     "м. Обухів": {
         "вул. Центральна": ["1", "2", "3"],
-        "вул. Миру":       ["5", "7", "9"],
+        "вул. Миру": ["5", "7", "9"],
     },
 }
 
 _HOUSE_GROUPS: dict[str, str] = {
-    "1": "GPV3.1", "1А": "GPV3.1", "1/1": "GPV3.2",
-    "2": "GPV3.2", "2А": "GPV3.2",
-    "3": "GPV3.1", "4": "GPV4.1",
-    "5": "GPV3.1", "6": "GPV4.1",
-    "7": "GPV3.2", "8": "GPV4.1",
-    "9": "GPV3.1", "10": "GPV4.1",
-    "11": "GPV3.2", "12": "GPV3.1",
+    "1": "GPV3.1",
+    "1А": "GPV3.1",
+    "1/1": "GPV3.2",
+    "2": "GPV3.2",
+    "2А": "GPV3.2",
+    "3": "GPV3.1",
+    "4": "GPV4.1",
+    "5": "GPV3.1",
+    "6": "GPV4.1",
+    "7": "GPV3.2",
+    "8": "GPV4.1",
+    "9": "GPV3.1",
+    "10": "GPV4.1",
+    "11": "GPV3.2",
+    "12": "GPV3.1",
     "14": "GPV3.2",
 }
 
@@ -177,6 +180,7 @@ def _make_home_num_response(city: str, street: str) -> HomeNumResponse:
 
 
 # ── StubDtekClient ────────────────────────────────────────────────────────────
+
 
 class StubDtekClient:
     """Drop-in replacement for :class:`~dtek_client.DtekClient`.
@@ -242,10 +246,7 @@ class StubDtekClient:
         response = _make_home_num_response(city, street)
         entry = response.houses.get(house_number)
         group_id = (entry.primary_group if entry else None) or "GPV3.1"
-        group_name = (
-            response.preset.sch_names.get(group_id, "")
-            if response.preset else ""
-        )
+        group_name = response.preset.sch_names.get(group_id, "") if response.preset else ""
         return AddressResult(
             site_key=self._site_key,
             city=city,
@@ -281,6 +282,7 @@ class StubDtekClient:
     def base_url(self) -> str:
         """Base URL for the configured region (from DTEK_SITES)."""
         from .const import DTEK_SITES
+
         return DTEK_SITES.get(self._site_key, ("https://stub.example.com", ""))[0]
 
     @property

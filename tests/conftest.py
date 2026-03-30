@@ -1,4 +1,5 @@
 """Shared pytest fixtures for dtek-blackout-client tests."""
+
 from __future__ import annotations
 
 import json
@@ -14,16 +15,12 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture
 def home_num_raw() -> dict[str, Any]:
     # encoding="utf-8" is required on Windows where the default is cp1252.
-    return json.loads(
-        (FIXTURES_DIR / "home_num_response.json").read_text(encoding="utf-8")
-    )
+    return json.loads((FIXTURES_DIR / "home_num_response.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture
 def streets_raw() -> dict[str, Any]:
-    return json.loads(
-        (FIXTURES_DIR / "streets_response.json").read_text(encoding="utf-8")
-    )
+    return json.loads((FIXTURES_DIR / "streets_response.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture

@@ -1,4 +1,5 @@
 """Unit tests for StubDtekClient."""
+
 from __future__ import annotations
 
 import pytest
@@ -109,6 +110,7 @@ class TestStubGetTodaySchedule:
             for v in result.values():
                 assert isinstance(v, SlotStatus)
 
+
 class TestStubProperties:
     def test_base_url_fallback_for_unrecognised_site_key(self) -> None:
         """When a site_key that does not exist in DTEK_SITES is passed (e.g.
@@ -116,4 +118,3 @@ class TestStubProperties:
         fallback URL rather than raising an exception."""
         stub = StubDtekClient("unknown_key_xyz")
         assert "stub.example.com" in stub.base_url
- 

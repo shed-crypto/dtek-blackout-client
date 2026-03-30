@@ -22,12 +22,12 @@ from typing import Final
 # schedule_page_path — page that contains <meta name="ajaxUrl">.
 # If the primary path does not work, the client tries SCHEDULE_PAGE_FALLBACK_PATHS.
 DTEK_SITES: Final[dict[str, tuple[str, str]]] = {
-    "kem":  ("https://www.dtek-kem.com.ua",  "/ua/shutdowns"),
+    "kem": ("https://www.dtek-kem.com.ua", "/ua/shutdowns"),
     "krem": ("https://www.dtek-krem.com.ua", "/ua/shutdowns"),
     "dnem": ("https://www.dtek-dnem.com.ua", "/ua/shutdowns"),
-    "dem":  ("https://www.dtek-dem.com.ua",  "/ua/shutdowns"),
-    "oem":  ("https://www.dtek-oem.com.ua",  "/ua/shutdowns"),
-    "zem":  ("https://www.dtek-zem.com.ua",  "/ua/shutdowns"),
+    "dem": ("https://www.dtek-dem.com.ua", "/ua/shutdowns"),
+    "oem": ("https://www.dtek-oem.com.ua", "/ua/shutdowns"),
+    "zem": ("https://www.dtek-zem.com.ua", "/ua/shutdowns"),
 }
 
 # Fallback schedule page paths tried when the primary path yields no <meta name="ajaxUrl">.
@@ -51,12 +51,12 @@ METHOD_CHECK_UPDATE: Final = "checkDisconUpdate"
 # Each slot represents a 30-minute interval (e.g. "00:00–00:30").
 # first/second — outage in the first/second half of the 30-min slot (~15 min).
 # mfirst/msecond — *possible* outage in the first/second half.
-SLOT_YES: Final = "yes"      # electricity available (no outage)
-SLOT_NO: Final = "no"        # definite outage for the whole slot
+SLOT_YES: Final = "yes"  # electricity available (no outage)
+SLOT_NO: Final = "no"  # definite outage for the whole slot
 SLOT_MAYBE: Final = "maybe"  # possible outage for the whole slot
-SLOT_FIRST: Final = "first"      # outage in the first half of the slot (~15 min)
-SLOT_SECOND: Final = "second"    # outage in the second half of the slot (~15 min)
-SLOT_MFIRST: Final = "mfirst"    # possible outage in the first half
+SLOT_FIRST: Final = "first"  # outage in the first half of the slot (~15 min)
+SLOT_SECOND: Final = "second"  # outage in the second half of the slot (~15 min)
+SLOT_MFIRST: Final = "mfirst"  # possible outage in the first half
 SLOT_MSECOND: Final = "msecond"  # possible outage in the second half
 
 # ── Day-of-week mapping (DTEK uses 1=Mon, …, 7=Sun — NOT Python's 0-based) ──
@@ -95,30 +95,30 @@ FALLBACK_AJAX_PATH: Final = "/ua/ajax"
 # English name is listed first; Ukrainian name follows for local context.
 # Use REGION_NAMES for UI labels in integrations (e.g. Home Assistant config flow).
 REGION_NAMES: Final[dict[str, str]] = {
-    "kem":  "DTEK Kyiv City Networks / ДТЕК Київські електромережі (м. Київ)",
+    "kem": "DTEK Kyiv City Networks / ДТЕК Київські електромережі (м. Київ)",
     "krem": "DTEK Kyiv Regional Networks / ДТЕК Київські регіональні (Київська обл.)",
     "dnem": "DTEK Dnipro Networks / ДТЕК Дніпровські електромережі",
-    "dem":  "DTEK Donetsk Networks / ДТЕК Донецькі електромережі",
-    "oem":  "DTEK Odesa Networks / ДТЕК Одеські електромережі",
-    "zem":  "DTEK Zaporizhzhia Networks / ДТЕК Запорізькі електромережі",
+    "dem": "DTEK Donetsk Networks / ДТЕК Донецькі електромережі",
+    "oem": "DTEK Odesa Networks / ДТЕК Одеські електромережі",
+    "zem": "DTEK Zaporizhzhia Networks / ДТЕК Запорізькі електромережі",
 }
 
 # English-only region names — useful for logs, API responses, and non-Ukrainian UIs.
 REGION_NAMES_EN: Final[dict[str, str]] = {
-    "kem":  "DTEK Kyiv City Networks",
+    "kem": "DTEK Kyiv City Networks",
     "krem": "DTEK Kyiv Regional Networks",
     "dnem": "DTEK Dnipro Networks",
-    "dem":  "DTEK Donetsk Networks",
-    "oem":  "DTEK Odesa Networks",
-    "zem":  "DTEK Zaporizhzhia Networks",
+    "dem": "DTEK Donetsk Networks",
+    "oem": "DTEK Odesa Networks",
+    "zem": "DTEK Zaporizhzhia Networks",
 }
 
 # Ukrainian-only region names — for Ukrainian-language UIs.
 REGION_NAMES_UA: Final[dict[str, str]] = {
-    "kem":  "ДТЕК Київські електромережі (м. Київ)",
+    "kem": "ДТЕК Київські електромережі (м. Київ)",
     "krem": "ДТЕК Київські регіональні (Київська обл.)",
     "dnem": "ДТЕК Дніпровські електромережі",
-    "dem":  "ДТЕК Донецькі електромережі",
-    "oem":  "ДТЕК Одеські електромережі",
-    "zem":  "ДТЕК Запорізькі електромережі",
+    "dem": "ДТЕК Донецькі електромережі",
+    "oem": "ДТЕК Одеські електромережі",
+    "zem": "ДТЕК Запорізькі електромережі",
 }

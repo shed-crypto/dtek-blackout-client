@@ -17,6 +17,7 @@ Slot status values:
 
 All models are frozen=True — safe to pass between coroutines.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -36,15 +37,16 @@ class _FrozenModel(BaseModel):
 
 # ── Slot status enum ──────────────────────────────────────────────────────────
 
+
 class SlotStatus(StrEnum):
     """Possible status values for a time-slot cell in the DTEK schedule table."""
 
-    YES = "yes"        # Electricity available — no outage
-    NO = "no"          # Definite outage for the whole slot
-    MAYBE = "maybe"    # Possible outage for the whole slot
-    FIRST = "first"    # Outage in the first half of the slot (~15 min)
+    YES = "yes"  # Electricity available — no outage
+    NO = "no"  # Definite outage for the whole slot
+    MAYBE = "maybe"  # Possible outage for the whole slot
+    FIRST = "first"  # Outage in the first half of the slot (~15 min)
     SECOND = "second"  # Outage in the second half of the slot (~15 min)
-    MFIRST = "mfirst"    # Possible outage in the first half
+    MFIRST = "mfirst"  # Possible outage in the first half
     MSECOND = "msecond"  # Possible outage in the second half
     UNKNOWN = "unknown"  # Fallback for unrecognised values
 
@@ -62,12 +64,17 @@ class SlotStatus(StrEnum):
     def may_have_outage(self) -> bool:
         """True if this slot has a definite OR possible outage."""
         return self in (
-            SlotStatus.NO, SlotStatus.FIRST, SlotStatus.SECOND,
-            SlotStatus.MAYBE, SlotStatus.MFIRST, SlotStatus.MSECOND,
+            SlotStatus.NO,
+            SlotStatus.FIRST,
+            SlotStatus.SECOND,
+            SlotStatus.MAYBE,
+            SlotStatus.MFIRST,
+            SlotStatus.MSECOND,
         )
 
 
 # ── Weekly planned schedule (preset.data) ─────────────────────────────────────
+
 
 class WeekDaySchedule(_FrozenModel):
     """Schedule for one disconnection group on one day of the week.
@@ -85,13 +92,7 @@ class WeekDaySchedule(_FrozenModel):
         """Accept a raw {slot_key: str_value} dict from the AJAX response."""
         if not isinstance(data, dict):
             return data
-        return {
-            "slots": {
-                k: SlotStatus(v)
-                for k, v in data.items()
-                if isinstance(v, str)
-            }
-        }
+        return {"slots": {k: SlotStatus(v) for k, v in data.items() if isinstance(v, str)}}
 
     @property
     def outage_slot_count(self) -> int:
@@ -160,10 +161,7 @@ class PresetSchedule(_FrozenModel):
 
         # time_zone values may be arrays like ["00:00–00:30", "00:00"] — take first.
         raw_tz: dict = data.get("time_zone", {})
-        time_zone = {
-            k: (v[0] if isinstance(v, list) else str(v))
-            for k, v in raw_tz.items()
-        }
+        time_zone = {k: (v[0] if isinstance(v, list) else str(v)) for k, v in raw_tz.items()}
 
         # days may come with string keys {"1": "Понеділок", …}.
         raw_days: dict = data.get("days", {})
@@ -189,6 +187,7 @@ class PresetSchedule(_FrozenModel):
 
 
 # ── Actual (fact) schedule ────────────────────────────────────────────────────
+
 
 class FactDaySchedule(_FrozenModel):
     """Actual confirmed schedule for one group on one specific calendar day.
@@ -270,6 +269,7 @@ class FactSchedule(_FrozenModel):
 
 # ── House entry (from getHomeNum response) ────────────────────────────────────
 
+
 class HouseEntry(_FrozenModel):
     """One house from the ``getHomeNum`` AJAX response.
 
@@ -319,6 +319,7 @@ class HouseEntry(_FrozenModel):
 
 
 # ── Full getHomeNum response ───────────────────────────────────────────────────
+
 
 class HomeNumResponse(_FrozenModel):
     """Full parsed response from the ``getHomeNum`` AJAX call.
@@ -391,6 +392,7 @@ class HomeNumResponse(_FrozenModel):
 
 # ── Street suggestion ─────────────────────────────────────────────────────────
 
+
 class StreetSuggestion(_FrozenModel):
     """One street returned by the ``getStreets`` AJAX call.
 
@@ -404,6 +406,7 @@ class StreetSuggestion(_FrozenModel):
 
 
 # ── Address lookup result ─────────────────────────────────────────────────────
+
 
 class AddressResult(_FrozenModel):
     """Result of a full address lookup (site → city → street → house → group).

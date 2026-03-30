@@ -1,4 +1,5 @@
 """Unit tests for dtek_client.exceptions."""
+
 from __future__ import annotations
 
 import pytest
