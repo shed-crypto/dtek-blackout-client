@@ -5,7 +5,7 @@ description = "Async Python client for DTEK regional electricity-outage schedule
 authors = [
     {name = "Rachenko", email = "alexey.rachenko@gmail.com"}
 ]
-license = {text = "MIT"}
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
 keywords = ["dtek", "home-assistant", "ukraine", "electricity", "outage", "blackout", "async"]
@@ -13,7 +13,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,16 +29,16 @@ dependencies = [
 ]
 
 [project.urls]
-homepage = "https://github.com/yourusername/dtek-blackout-client"
-repository = "https://github.com/yourusername/dtek-blackout-client"
-documentation = "https://github.com/yourusername/dtek-blackout-client#readme"
+homepage = "https://github.com/shed-crypto/dtek-blackout-client"
+repository = "https://github.com/shed-crypto/dtek-blackout-client"
+documentation = "https://github.com/shed-crypto/dtek-blackout-client#readme"
 
 [tool.poetry]
-# Обов'язково для коректного імпорту модуля dtek_client
+package-mode = false
 packages = [{ include = "dtek_client" }]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=1.0.0,<2.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [dependency-groups]
