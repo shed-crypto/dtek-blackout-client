@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class _FrozenModel(BaseModel):
-    model_config = {  # type: ignore[assignment]
+    model_config = {
         "frozen": True,
         "extra": "ignore",
         "populate_by_name": True,
@@ -235,7 +235,7 @@ class FactSchedule(_FrozenModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data: dict = data.get("data", {})
+        raw_data: dict[str, Any] = data.get("data", {})
         days: dict[str, dict[str, dict[str, SlotStatus]]] = {}
 
         for ts_str, group_map in raw_data.items():
@@ -351,7 +351,7 @@ class HomeNumResponse(_FrozenModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data: dict = data.get("data", {})
+        raw_data: dict[str, Any] = data.get("data", {})
         houses: dict[str, HouseEntry] = {}
         for house_num, entry in raw_data.items():
             if not isinstance(entry, dict):
