@@ -34,7 +34,6 @@ repository = "https://github.com/shed-crypto/dtek-blackout-client"
 documentation = "https://github.com/shed-crypto/dtek-blackout-client#readme"
 
 [tool.poetry]
-package-mode = false
 packages = [{ include = "dtek_client" }]
 
 [build-system]
