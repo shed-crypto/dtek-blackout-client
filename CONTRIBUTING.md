@@ -613,7 +613,7 @@ POST <ajaxUrl>
 
 ```bash
 # 1. Клонувати репозиторій
-git clone https://github.com/yourusername/dtek-blackout-client.git
+git clone https://github.com/shed-crypto/dtek-blackout-client.git
 cd dtek-blackout-client
 
 # 2. Встановити всі залежності (включно з dev)
