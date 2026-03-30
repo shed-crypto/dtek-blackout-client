@@ -151,7 +151,7 @@ class DtekClient:
         timeout: float = DEFAULT_TIMEOUT,
         retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
         retry_delay: float = DEFAULT_RETRY_DELAY,
-        session: AsyncSession | None = None,
+        session: AsyncSession[Any] | None = None,
     ) -> None:
         if site_key not in DTEK_SITES:
             raise DtekSiteError(
@@ -164,7 +164,7 @@ class DtekClient:
         self._timeout = timeout
         self._retry_attempts = retry_attempts
         self._retry_delay = retry_delay
-        self._session: AsyncSession | None = session
+        self._session: AsyncSession[Any] | None = session
         # True when the client owns the session and must close it on exit.
         self._owns_session: bool = session is None
         # Cache for the global schedule fetched via checkDisconUpdate.

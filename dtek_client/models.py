@@ -143,7 +143,7 @@ class PresetSchedule(_FrozenModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data: dict = data.get("data", {})
+        raw_data: dict[str, Any] = data.get("data", {})
         groups: dict[str, GroupWeekSchedule] = {}
 
         for group_id, day_map in raw_data.items():
@@ -160,14 +160,14 @@ class PresetSchedule(_FrozenModel):
             groups[group_id] = GroupWeekSchedule(group_id=group_id, days=days_parsed)
 
         # time_zone values may be arrays like ["00:00–00:30", "00:00"] — take first.
-        raw_tz: dict = data.get("time_zone", {})
+        raw_tz: dict[str, Any] = data.get("time_zone", {})
         time_zone = {k: (v[0] if isinstance(v, list) else str(v)) for k, v in raw_tz.items()}
 
         # days may come with string keys {"1": "Понеділок", …}.
-        raw_days: dict = data.get("days", {})
+        raw_days: dict[str, Any] = data.get("days", {})
         days_out = {int(k): str(v) for k, v in raw_days.items() if str(k).isdigit()}
 
-        sch_names: dict = data.get("sch_names", {})
+        sch_names: dict[str, Any] = data.get("sch_names", {})
 
         # is_active: False when time_zone or data is empty.
         is_active = bool(time_zone) and bool(raw_data)
