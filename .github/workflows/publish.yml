@@ -6,14 +6,9 @@ on:
       - "v*"
 
 jobs:
-  publish:
-    name: Build and publish
+  build:
+    name: Build package
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write   # Required for Trusted Publishing (OIDC)
-      contents: write   # Required for GitHub Release creation
-
     steps:
       - uses: actions/checkout@v4
 
@@ -41,11 +36,47 @@ jobs:
       - name: Build package
         run: poetry build
 
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-        continue-on-error: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
