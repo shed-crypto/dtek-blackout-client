@@ -46,7 +46,7 @@ Region names are also available programmatically — see `const.REGION_NAMES`,
 - ✅ **Resilient** — automatic retry with linear back-off on 5xx errors
 - ✅ **Stub included** — `StubDtekClient` allows offline development without any network access
 - ✅ **Tested** — 90%+ coverage, all HTTP calls mocked; no internet required in CI
-
+- ✅ **Timezone-aware** — correctly handles Kyiv time (EEST) via zoneinfo; works on Windows thanks to tzdata integration.
 ---
 
 ## Installation
@@ -198,6 +198,9 @@ falls back to `base_url + /ua/ajax` if none match.
 | `get_home_num(city, street)` | `HomeNumResponse` | All houses + groups + schedule for a street |
 | `get_group_by_address(city, street, house_number)` | `AddressResult` | Group for a specific address |
 | `get_today_schedule(city, street, house_number)` | `dict[str, SlotStatus] \| None` | Today's slot map for one address |
+| `get_tomorrow_schedule(city, street, house)` | `dict \| None` | Shortcut for tomorrow's confirmed schedule |
+| `get_available_fact_dates(response)` | `list[date]` | Discover which dates have published schedules (static method) |
+| `get_schedule_for_date(city, street, house, date)` | `dict \| None` | Get confirmed schedule for a specific datetime.date |
 
 ### Key models
 
@@ -377,6 +380,7 @@ Total coverage: 99.83%
 - ✅ **Стійкий** — автоматичний повтор із лінійним відступом при помилках 5xx
 - ✅ **Стаб включено** — `StubDtekClient` дозволяє вести розробку офлайн без доступу до мережі
 - ✅ **Протестований** — покриття 90%+, всі HTTP-виклики замоковані; CI не потребує Інтернету
+- ✅ **З урахуванням часових поясів** — коректно обробляє київський час (EEST) через zoneinfo; працює у Windows завдяки інтеграції з tzdata.
 
 ---
 
@@ -530,6 +534,9 @@ asyncio.run(main())
 | `get_home_num(city, street)` | `HomeNumResponse` | Всі будинки + групи + графік для вулиці |
 | `get_group_by_address(city, street, house_number)` | `AddressResult` | Черга для конкретної адреси |
 | `get_today_schedule(city, street, house_number)` | `dict[str, SlotStatus] \| None` | Карта слотів на сьогодні для однієї адреси |
+| `get_tomorrow_schedule(city, street, house)` | `dict \| None` | Скорочений шлях до підтвердженого розкладу на завтра |
+| `get_available_fact_dates(response)` | `list[date]` | Дізнайтеся, на які дати опубліковано розклади (статичний метод) |
+| `get_schedule_for_date(city, street, house, date)` | `dict \| None` | Отримати підтверджений розклад на певну дату/час |
 
 ### Основні моделі
 
