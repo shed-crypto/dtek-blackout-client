@@ -997,7 +997,19 @@ files = [
 [package.dependencies]
 typing-extensions = ">=4.12.0"
 
+[[package]]
+name = "tzdata"
+version = "2026.1"
+description = "Provider of IANA time zone data"
+optional = false
+python-versions = ">=2"
+groups = ["main"]
+files = [
+    {file = "tzdata-2026.1-py2.py3-none-any.whl", hash = "sha256:4b1d2be7ac37ceafd7327b961aa3a54e467efbdb563a23655fbfe0d39cfc42a9"},
+    {file = "tzdata-2026.1.tar.gz", hash = "sha256:67658a1903c75917309e753fdc349ac0efd8c27db7a0cb406a25be4840f87f98"},
+]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "7be40328df468139142b51bb11674d3989b9fb3576fddbeb712221c29b0ef571"
+content-hash = "d981742495fa10aeb71110b3fa677c2f4144797c2fdacab23ad1fd00e011f50d"
