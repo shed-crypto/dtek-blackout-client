@@ -40,12 +40,8 @@ Supported site_keys (DTEK regional sites):
     "oem"  – DTEK Odesa            (Odesa, Odesa oblast)
     "zem"  – DTEK Zaporizhzhia     (Zaporizhzhia)
 """
-from importlib.metadata import version, PackageNotFoundError
 
-try:
-    __version__ = version("dtek-blackout-client")
-except PackageNotFoundError:
-    __version__ = "unknown"
+from importlib.metadata import PackageNotFoundError, version
 
 from .client import DtekClient
 from .exceptions import (
@@ -74,6 +70,11 @@ from .models import (
     WeekDaySchedule,
 )
 from .stub_client import StubDtekClient
+
+try:
+    __version__ = version("dtek-blackout-client")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 __all__ = [
     "DtekClient",
