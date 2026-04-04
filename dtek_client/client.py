@@ -29,8 +29,9 @@ Quick start::
 """
 
 from __future__ import annotations
-
+from zoneinfo import ZoneInfo
 import asyncio
+import datetime
 import logging
 import re
 import urllib.parse
@@ -599,6 +600,101 @@ class DtekClient:
 
         return response.fact.get_group_today(entry.primary_group)
 
+    async def get_tomorrow_schedule(
+        self,
+        city: str,
+        street: str,
+        house_number: str,
+        *,
+        update_fact: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Shortcut: return tomorrow's fact-schedule slot map for one house.
+
+        The DTEK site publishes tomorrow's schedule during the day (usually
+        after 16:00–18:00 Kyiv time). Until then this method returns ``None``.
+
+        Each slot represents a 30-minute interval (e.g. "00:00–00:30").
+
+        Returns:
+            dict mapping time-zone keys to :class:`SlotStatus`, or ``None``
+            if tomorrow's schedule has not yet been published.
+        """
+        response = await self.get_home_num(city, street, update_fact=update_fact)
+        entry = response.houses.get(house_number)
+        if entry is None or not entry.primary_group:
+            return None
+        if response.fact is None:
+            return None
+
+        tomorrow_ts = response.fact.today_ts + 86400
+        return response.fact.get_group_day(tomorrow_ts, entry.primary_group)
+
+    async def get_schedule_for_date(
+        self,
+        city: str,
+        street: str,
+        house_number: str,
+        date: datetime.date,
+        *,
+        update_fact: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the fact-schedule slot map for a specific calendar date.
+
+        The server usually keeps today and tomorrow in the ``fact`` payload.
+        Dates further in the future (or past) will return ``None``.
+
+        Args:
+            city: city name (e.g. "м. Українка").
+            street: street name (e.g. "вул. Юності").
+            house_number: building number (e.g. "10").
+            date: the calendar date to query (e.g. ``datetime.date.today()``).
+            update_fact: optional timestamp from a previous response.
+
+        Returns:
+            dict mapping time-zone keys to :class:`SlotStatus`, or ``None``
+            if the schedule for the given date is not available.
+        """
+        response = await self.get_home_num(city, street, update_fact=update_fact)
+        entry = response.houses.get(house_number)
+        if entry is None or not entry.primary_group:
+            return None
+        if response.fact is None:
+            return None
+
+        # Convert the Python date to a Unix timestamp by calculating the offset
+        # in days from fact.today_ts (which is midnight Kyiv time from the server).
+        today_ts = response.fact.today_ts
+        today_date = datetime.datetime.fromtimestamp(today_ts, tz=ZoneInfo("Europe/Kyiv")).date()
+        delta_days = (date - today_date).days
+        target_ts = today_ts + delta_days * 86400
+
+        return response.fact.get_group_day(target_ts, entry.primary_group)
+    
+    @staticmethod
+    def get_available_fact_dates(response: Any) -> list[datetime.date]:
+        """Return all calendar dates available in a ``HomeNumResponse.fact``.
+
+        Use this to discover which dates the server has published schedules for
+        (typically today and tomorrow, sometimes only today).
+
+        Args:
+            response: a :class:`HomeNumResponse` returned by :meth:`get_home_num`.
+
+        Returns:
+            Sorted list of :class:`datetime.date` objects.
+        """
+        if response.fact is None:
+            return []
+        dates: list[datetime.date] = []
+        for ts_str in response.fact.days:
+            try:
+                ts = int(ts_str)
+                d = datetime.datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Kyiv")).date()
+                dates.append(d)
+            except (ValueError, OSError):
+                continue
+        return sorted(dates)
+
     # ── Properties ────────────────────────────────────────────────────────────
 
     @property
@@ -615,3 +711,4 @@ class DtekClient:
     def ajax_url(self) -> str | None:
         """Cached ajaxUrl (None until the first request is made)."""
         return self._ajax_url
+    
