@@ -1,6 +1,6 @@
 [project]
 name = "dtek-blackout-client"
-version = "0.1.2"
+version = "0.1.9"
 description = "Async Python client for DTEK regional electricity-outage schedule sites"
 authors = [
     {name = "Rachenko", email = "alexey.rachenko@gmail.com"}
@@ -36,7 +36,6 @@ documentation = "https://github.com/shed-crypto/dtek-blackout-client#readme"
 
 [tool.poetry]
 name = "dtek-blackout-client"
-version = "0.1.7"
 description = "Async Python client for DTEK regional electricity-outage schedule sites"
 authors = ["Rachenko <alexey.rachenko@gmail.com>"]
 packages = [{ include = "dtek_client" }]
