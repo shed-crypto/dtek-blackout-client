@@ -21,6 +21,7 @@ revert that one import — nothing else changes.
 
 from __future__ import annotations
 
+import datetime
 from types import TracebackType
 from typing import Any
 
@@ -96,13 +97,17 @@ def _make_preset() -> PresetSchedule:
 
 
 def _make_fact(today_ts: int, group_id: str, outage_slots: set[str]) -> FactSchedule:
-    """Build a FactSchedule stub for today."""
+    """Build a FactSchedule stub for today AND tomorrow (mirrors real server behaviour)."""
     slots = {k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES) for k in _TIME_ZONE}
+    tomorrow_ts = today_ts + 86400
     # Use model_construct to bypass model_validator (expects raw AJAX dict).
     return FactSchedule.model_construct(
         today_ts=today_ts,
         update="Stub data",
-        days={str(today_ts): {group_id: slots}},
+        days={
+            str(today_ts): {group_id: slots},
+            str(tomorrow_ts): {group_id: slots},  # tomorrow — same pattern as stub
+        },
     )
 
 
@@ -271,6 +276,61 @@ class StubDtekClient:
             return None
         return response.fact.get_group_today(entry.primary_group)
 
+    async def get_tomorrow_schedule(
+        self,
+        city: str,
+        street: str,
+        house_number: str,
+        *,
+        update_fact: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return tomorrow's slot map for one address — always returns data in the stub."""
+        response = _make_home_num_response(city, street)
+        entry = response.houses.get(house_number)
+        if not entry or not entry.primary_group or not response.fact:
+            return None
+        tomorrow_ts = response.fact.today_ts + 86400
+        return response.fact.get_group_day(tomorrow_ts, entry.primary_group)
+
+    async def get_schedule_for_date(
+        self,
+        city: str,
+        street: str,
+        house_number: str,
+        date: datetime.date,
+        *,
+        update_fact: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the slot map for a specific date — stub returns data for today/tomorrow only."""
+        response = _make_home_num_response(city, street)
+        entry = response.houses.get(house_number)
+        if not entry or not entry.primary_group or not response.fact:
+            return None
+        today_ts = response.fact.today_ts
+        today_date = datetime.datetime.fromtimestamp(
+            today_ts, tz=datetime.timezone.utc
+        ).date()
+        delta_days = (date - today_date).days
+        target_ts = today_ts + delta_days * 86400
+        return response.fact.get_group_day(target_ts, entry.primary_group)
+
+    @staticmethod
+    def get_available_fact_dates(response: Any) -> list[datetime.date]:
+        """Return all calendar dates available in a HomeNumResponse.fact."""
+        if response.fact is None:
+            return []
+        dates: list[datetime.date] = []
+        for ts_str in response.fact.days:
+            try:
+                ts = int(ts_str)
+                d = datetime.datetime.fromtimestamp(
+                    ts, tz=datetime.timezone.utc
+                ).date()
+                dates.append(d)
+            except (ValueError, OSError):
+                continue
+        return sorted(dates)
+
     # ── Properties ────────────────────────────────────────────────────────────
 
     @property
@@ -289,3 +349,4 @@ class StubDtekClient:
     def ajax_url(self) -> str | None:
         """Always None — the stub does not use an AJAX endpoint."""
         return None
+    
