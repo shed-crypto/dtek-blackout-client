@@ -42,7 +42,10 @@ __all__ = ["StubDtekClient"]
 # ── Hardcoded time-zone labels ────────────────────────────────────────────────
 
 _TIME_ZONE: dict[str, str] = {
-    str(i): (f"{((i-1)*30)//60:02d}:{((i-1)*30)%60:02d}" f"–{(i*30)//60:02d}:{(i*30)%60:02d}")
+    str(i): (
+        f"{((i - 1) * 30) // 60:02d}:{((i - 1) * 30) % 60:02d}"
+        f"–{(i * 30) // 60:02d}:{(i * 30) % 60:02d}"
+    )
     for i in range(1, 49)
 }
 # Slot 48 ends at 24:00, not 00:00.
@@ -307,9 +310,7 @@ class StubDtekClient:
         if not entry or not entry.primary_group or not response.fact:
             return None
         today_ts = response.fact.today_ts
-        today_date = datetime.datetime.fromtimestamp(
-            today_ts, tz=datetime.timezone.utc
-        ).date()
+        today_date = datetime.datetime.fromtimestamp(today_ts, tz=datetime.UTC).date()
         delta_days = (date - today_date).days
         target_ts = today_ts + delta_days * 86400
         return response.fact.get_group_day(target_ts, entry.primary_group)
@@ -323,9 +324,7 @@ class StubDtekClient:
         for ts_str in response.fact.days:
             try:
                 ts = int(ts_str)
-                d = datetime.datetime.fromtimestamp(
-                    ts, tz=datetime.timezone.utc
-                ).date()
+                d = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC).date()
                 dates.append(d)
             except (ValueError, OSError):
                 continue
@@ -349,4 +348,3 @@ class StubDtekClient:
     def ajax_url(self) -> str | None:
         """Always None — the stub does not use an AJAX endpoint."""
         return None
-    

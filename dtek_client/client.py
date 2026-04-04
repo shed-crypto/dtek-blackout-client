@@ -29,7 +29,7 @@ Quick start::
 """
 
 from __future__ import annotations
-from zoneinfo import ZoneInfo
+
 import asyncio
 import datetime
 import logging
@@ -37,6 +37,7 @@ import re
 import urllib.parse
 from typing import Any
 from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo
 
 from curl_cffi.requests import AsyncSession
 from curl_cffi.requests.errors import RequestsError
@@ -156,7 +157,7 @@ class DtekClient:
     ) -> None:
         if site_key not in DTEK_SITES:
             raise DtekSiteError(
-                f"Unknown site_key {site_key!r}. " f"Valid options: {sorted(DTEK_SITES.keys())}"
+                f"Unknown site_key {site_key!r}. Valid options: {sorted(DTEK_SITES.keys())}"
             )
 
         self._site_key = site_key
@@ -455,7 +456,7 @@ class DtekClient:
                         break
             if city_streets is None:
                 _LOGGER.warning(
-                    "getStreets: city %r not found in response. " "Available cities: %s",
+                    "getStreets: city %r not found in response. Available cities: %s",
                     city,
                     sorted(str(k) for k in streets_raw.keys()),
                 )
@@ -669,7 +670,7 @@ class DtekClient:
         target_ts = today_ts + delta_days * 86400
 
         return response.fact.get_group_day(target_ts, entry.primary_group)
-    
+
     @staticmethod
     def get_available_fact_dates(response: Any) -> list[datetime.date]:
         """Return all calendar dates available in a ``HomeNumResponse.fact``.
@@ -711,4 +712,3 @@ class DtekClient:
     def ajax_url(self) -> str | None:
         """Cached ajaxUrl (None until the first request is made)."""
         return self._ajax_url
-    

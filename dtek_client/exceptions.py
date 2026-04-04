@@ -25,11 +25,7 @@ class DtekClientError(Exception):
         self.status_code = status_code
 
     def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"message={str(self)!r}, "
-            f"status_code={self.status_code!r})"
-        )
+        return f"{self.__class__.__name__}(message={str(self)!r}, status_code={self.status_code!r})"
 
 
 # ── Network / Connectivity ────────────────────────────────────────────────────
