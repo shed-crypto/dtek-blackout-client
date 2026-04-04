@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import datetime
+import pprint
 from curl_cffi.requests import AsyncSession
 from dtek_client import DtekClient
 from dtek_client.browser_auth import get_cleared_cookies
@@ -232,6 +234,58 @@ async def test_oem() -> None:
     except Exception as e:
         print(f"Error in krem: {e}")
 
+async def test_kem() -> None:
+    print("\n" + "="*50)
+    print("=== ТЕСТ: Київські електромережі (kem) ===")
+    print("="*50)
+    
+    base_url = "https://www.dtek-kem.com.ua"
+    try:
+        session = await create_session(base_url)
+        
+        async with DtekClient("kem", ajax_url=f"{base_url}/ua/ajax", session=session) as client:
+            try:
+                print("\n--- Вулиці м. Київ (перші 10) ---")
+                streets = await client.get_streets("м. Київ")
+                for s in streets[:10]:
+                    print(f"  {s.name}")
+
+                test_street = "вул. Хрещатик"
+                print(f"\n--- Будинки: {test_street} ---")
+                response = await client.get_home_num("м. Київ", test_street)
+                
+                # Сортуємо для гарного виводу
+                import re
+                def sort_key(k: str) -> tuple:
+                    nums = re.findall(r'\d+', k)
+                    return (int(nums[0]) if nums else 9999, k)
+                    
+                # Виведемо перші 15 будинків
+                for house in sorted(response.houses.keys(), key=sort_key)[:15]:
+                    entry = response.houses[house]
+                    status = "виключено з графіку" if entry.is_excluded else entry.primary_group
+                    print(f"  {house:6s} → {status}")
+
+                test_house = "1"
+                print(f"\n--- Розклад на сьогодні (факт) для {test_street}, {test_house} ---")
+                
+                if test_house in response.houses:
+                    slots = await client.get_today_schedule("м. Київ", test_street, test_house)
+                    if slots and response.preset:
+                        for key, status in slots.items():
+                            label = response.preset.time_zone.get(key, key)
+                            icon = "⚡" if status.has_outage else ("~" if status.may_have_outage else "✓")
+                            print(f"  {icon} {label:15s} {status.value}")
+                    else:
+                        print("  Розклад на сьогодні ще не опублікований.")
+                else:
+                    print(f"  ❌ Будинок '{test_house}' не знайдено!")
+                    
+            except Exception as e:
+                print(f"Error in kem: {e}")
+    except Exception as e:
+        print(f"Error in kem session creation: {e}")
+
 async def test_autocomplete_stub() -> None:
     """Демонстрація автодоповнення вулиць та номерів будинків через StubDtekClient."""
     print("\n" + "=" * 55)
@@ -396,11 +450,129 @@ async def test_autocomplete_real() -> None:
             print(f"  Назва:    {result.group_display_name}")
             print(f"  Адреса:   {result.city}, {result.street}, {result.house_number}")
 
+async def test_fact_real() -> None:
+    print("\n" + "="*50)
+    print("--- Тестування DTEK API (Київ) ---")
+    print("="*50)
+    
+    base_url = "https://www.dtek-kem.com.ua"
+    
+    try:
+        # 1. Створюємо сесію з проходженням WAF (як у test_krem)
+        session = await create_session(base_url)
+        
+        # 2. Передаємо сесію та ЯВНО вказуємо ajax_url
+        async with DtekClient(
+            "kem", 
+            ajax_url=f"{base_url}/ua/ajax", 
+            session=session
+        ) as client:
+            
+            city_name = "м. Київ"
+            test_street = "вул. Хрещатик"
+            test_house = "1"
+
+            print(f"\n[1] Запит get_streets для '{city_name}':")
+            streets = await client.get_streets(city_name)
+ 
+            if streets:
+                print(f"Успіх! Знайдено унікальних вулиць: {len(streets)}")
+                print("Перші 5 вулиць (вивід через об'єкти):")
+                for s in streets[:5]:
+                    print(f"  • {s.name}")
+            else:
+                print("Вулиць не знайдено.")
+    
+            print(f"\n[2] Запит get_home_num для '{test_street}':")
+            try:
+                response = await client.get_home_num(city_name, test_street)
+    
+                print(f"Успіх! Отримано об'єкт з {len(response.houses)} будинками.")
+                print(f"Останнє оновлення бази ДТЕК: {response.update_timestamp}")
+    
+                if response.houses:
+                    print(f"\nФрагмент списку будинків на {test_street}:")
+                    for hn, entry in list(response.houses.items())[:5]:
+                        print(f"  Будинок {hn:3} -> Головна група: {entry.primary_group}")
+    
+                if response.preset:
+                    print(f"\nСтатус графіку: {'Активний' if response.preset.is_active else 'Неактивний'}")
+    
+            except Exception as e:
+                print(f"Помилка валідації або запиту: {e}")
+                return
+    
+            # ── [3] Нові методи дат ───────────────────────────────────────────────
+    
+            print(f"\n[3] Нові методи дат для '{test_street}', буд. {test_house}:")
+    
+            # 3а. Доступні дати факту (для UI-вкладок «сьогодні / завтра»)
+            dates = client.get_available_fact_dates(response)
+            if dates:
+                today = datetime.date.fromtimestamp(response.fact.today_ts)
+                print(f"  Доступні дати факту ({len(dates)} шт.):")
+                for d in dates:
+                    label = ""
+                    if d == today:
+                        label = " ← сьогодні"
+                    elif d == today + datetime.timedelta(days=1):
+                        label = " ← завтра"
+                    print(f"    {d}{label}")
+            else:
+                print("  Дат факту не знайдено (fact відсутній або порожній).")
+    
+            # 3б. Графік на завтра
+            print(f"\n  get_tomorrow_schedule:")
+            try:
+                tmrw = await client.get_tomorrow_schedule(city_name, test_street, test_house)
+                if tmrw is None:
+                    print("  → Завтрашній графік ще не опублікований (None).")
+                else:
+                    outages = sum(1 for v in tmrw.values() if v.has_outage)
+                    print(f"  → Є дані: {len(tmrw)} слотів, з них відключень: {outages}")
+                    
+                    # ДОДАНО: Виведення повного графіка на завтра
+                    for key, status in tmrw.items():
+                        label = response.preset.time_zone.get(key, key) if response.preset else key
+                        icon = "⚡" if status.has_outage else ("~" if status.may_have_outage else "✓")
+                        print(f"      {icon} {label:15s} {status.value}")
+
+            except Exception as e:
+                print(f"  → Помилка: {e}")
+    
+            # 3в. Графік для конкретної дати (перебираємо всі доступні)
+            print(f"\n  get_schedule_for_date (по всіх доступних датах):")
+            for d in dates:
+                try:
+                    slots = await client.get_schedule_for_date(
+                        city_name, test_street, test_house, d
+                    )
+                    if slots is None:
+                        print(f"    {d}: немає даних")
+                    else:
+                        outages = sum(1 for v in slots.values() if v.has_outage)
+                        print(f"    {d}: {len(slots)} слотів, відключень: {outages}")
+                        
+                        # ДОДАНО: Виведення повного графіка для кожної дати
+                        for key, status in slots.items():
+                            label = response.preset.time_zone.get(key, key) if response.preset else key
+                            icon = "⚡" if status.has_outage else ("~" if status.may_have_outage else "✓")
+                            print(f"      {icon} {label:15s} {status.value}")
+
+                except Exception as e:
+                    print(f"    {d}: помилка — {e}")
+                    
+    # ЗМІНЕНО: Глобальний except більше не використовує локальну змінну d
+    except Exception as e:
+        print(f"Глобальна помилка у test_fact_real: {e}")
+
 async def main() -> None:
-    await test_stub()   # Спочатку тестуємо стаб (швидко, без мережі)
-    await test_krem()   # Тестуємо Київську область
-    await test_oem()    # Тестуємо Одесу
-    await test_autocomplete_stub() # Тестуємо автозавершення локально
-    await test_autocomplete_real() # Тестуємо автозавершення онлайн
+    #await test_stub()   # Спочатку тестуємо стаб (швидко, без мережі)
+    #await test_krem()   # Тестуємо Київську область
+    #await test_oem()    # Тестуємо Одесу
+    #await test_kem()    # Тестуємо Київ (місто)
+    #await test_autocomplete_stub() # Тестуємо автозавершення локально
+    #await test_autocomplete_real() # Тестуємо автозавершення онлайн
+    await test_fact_real() # Тестуємо фактичний графік онлайн
 if __name__ == "__main__":
     asyncio.run(main())
