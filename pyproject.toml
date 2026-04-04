@@ -1,6 +1,6 @@
 [project]
 name = "dtek-blackout-client"
-version = "0.1.9"
+version = "0.1.10"
 description = "Async Python client for DTEK regional electricity-outage schedule sites"
 authors = [
     {name = "Rachenko", email = "alexey.rachenko@gmail.com"}
