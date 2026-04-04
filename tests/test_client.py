@@ -729,7 +729,7 @@ class TestGetHomeNumGlobalSchedule:
 # ── Fixtures for new-method tests ─────────────────────────────────────────────
 
 # today_ts у fixtures/home_num_response.json = 1774483200
-_TODAY_TS   = 1774483200
+_TODAY_TS = 1774483200
 _TOMORROW_TS = _TODAY_TS + 86400
 
 
@@ -833,7 +833,7 @@ class TestGetTomorrowSchedule:
 
 
 class TestGetScheduleForDate:
-    _today    = datetime.date.fromtimestamp(_TODAY_TS)
+    _today = datetime.date.fromtimestamp(_TODAY_TS)
     _tomorrow = datetime.date.fromtimestamp(_TOMORROW_TS)
 
     async def test_today_equals_get_today_schedule(
@@ -843,9 +843,7 @@ class TestGetScheduleForDate:
     ) -> None:
         """get_schedule_for_date(today) == get_today_schedule()."""
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
-        today_direct = await client_with_ajax.get_today_schedule(
-            "м. Українка", "вул. Юності", "1"
-        )
+        today_direct = await client_with_ajax.get_today_schedule("м. Українка", "вул. Юності", "1")
         client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
         today_via_dt = await client_with_ajax.get_schedule_for_date(
             "м. Українка", "вул. Юності", "1", self._today
@@ -859,9 +857,7 @@ class TestGetScheduleForDate:
     ) -> None:
         """get_schedule_for_date(tomorrow) == get_tomorrow_schedule()."""
         client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
-        via_tmrw = await client_with_ajax.get_tomorrow_schedule(
-            "м. Українка", "вул. Юності", "1"
-        )
+        via_tmrw = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
         client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
         via_date = await client_with_ajax.get_schedule_for_date(
             "м. Українка", "вул. Юності", "1", self._tomorrow
@@ -973,9 +969,7 @@ class TestGetAvailableFactDates:
         dates = DtekClient.get_available_fact_dates(response)
         assert len(dates) == len(response.fact.days)
 
-    async def test_no_fact_returns_empty_list(
-        self, client_with_ajax: DtekClient
-    ) -> None:
+    async def test_no_fact_returns_empty_list(self, client_with_ajax: DtekClient) -> None:
         """Якщо fact=None — повертає [], без винятку."""
         response = HomeNumResponse.model_construct(
             houses={},

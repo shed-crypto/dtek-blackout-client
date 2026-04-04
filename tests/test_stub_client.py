@@ -173,7 +173,7 @@ class TestStubGetTomorrowSchedule:
         """Якщо стаб будує різні слоти для today і tomorrow, результати
         не повинні бути ідентичними об'єктами (різні timestamp-ключі)."""
         async with StubDtekClient() as c:
-            today    = await c.get_today_schedule("м. Українка", "вул. Юності", "1")
+            today = await c.get_today_schedule("м. Українка", "вул. Юності", "1")
             tomorrow = await c.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
         # Обидва можуть бути None лише якщо дані не опубліковані — але в стабі
         # вони мають бути присутні. Перевіряємо, що це різні dict-и (не один об'єкт).
@@ -193,8 +193,8 @@ class TestStubGetScheduleForDate:
     async def test_today_equals_get_today_schedule(self) -> None:
         """get_schedule_for_date(today) повинен збігатися з get_today_schedule()."""
         async with StubDtekClient() as c:
-            r      = await c.get_home_num("м. Українка", "вул. Юності")
-            today  = datetime.date.fromtimestamp(r.fact.today_ts)
+            r = await c.get_home_num("м. Українка", "вул. Юності")
+            today = datetime.date.fromtimestamp(r.fact.today_ts)
             direct = await c.get_today_schedule("м. Українка", "вул. Юності", "1")
             via_dt = await c.get_schedule_for_date("м. Українка", "вул. Юності", "1", today)
         assert direct == via_dt
@@ -202,22 +202,18 @@ class TestStubGetScheduleForDate:
     async def test_tomorrow_equals_get_tomorrow_schedule(self) -> None:
         """get_schedule_for_date(tomorrow) повинен збігатися з get_tomorrow_schedule()."""
         async with StubDtekClient() as c:
-            r        = await c.get_home_num("м. Українка", "вул. Юності")
-            today    = datetime.date.fromtimestamp(r.fact.today_ts)
+            r = await c.get_home_num("м. Українка", "вул. Юності")
+            today = datetime.date.fromtimestamp(r.fact.today_ts)
             tomorrow = today + datetime.timedelta(days=1)
             via_tmrw = await c.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
-            via_date = await c.get_schedule_for_date(
-                "м. Українка", "вул. Юності", "1", tomorrow
-            )
+            via_date = await c.get_schedule_for_date("м. Українка", "вул. Юності", "1", tomorrow)
         assert via_tmrw == via_date
 
     async def test_date_not_in_fact_returns_none(self) -> None:
         """Дата, якої немає в fact.days, повертає None."""
         far_future = datetime.date(2099, 1, 1)
         async with StubDtekClient() as c:
-            result = await c.get_schedule_for_date(
-                "м. Українка", "вул. Юності", "1", far_future
-            )
+            result = await c.get_schedule_for_date("м. Українка", "вул. Юності", "1", far_future)
         assert result is None
 
     async def test_returns_dict_or_none(self) -> None:
@@ -240,9 +236,7 @@ class TestStubGetScheduleForDate:
         """Неіснуючий будинок → None для будь-якої дати."""
         today = await self._today_date()
         async with StubDtekClient() as c:
-            result = await c.get_schedule_for_date(
-                "м. Українка", "вул. Юності", "999", today
-            )
+            result = await c.get_schedule_for_date("м. Українка", "вул. Юності", "999", today)
         assert result is None
 
     async def test_accepts_datetime_date_object(self) -> None:
@@ -273,9 +267,7 @@ class TestStubGetAvailableFactDates:
         """Стаб будує fact із today + tomorrow → мінімум 2 дати."""
         r = await self._response()
         dates = StubDtekClient.get_available_fact_dates(r)
-        assert len(dates) >= 2, (
-            f"Очікувалось ≥ 2 дати факту (сьогодні + завтра), отримано: {dates}"
-        )
+        assert len(dates) >= 2, f"Очікувалось ≥ 2 дати факту (сьогодні + завтра), отримано: {dates}"
 
     async def test_dates_are_sorted_ascending(self) -> None:
         """Список відсортований від найранішої до найпізнішої дати."""
@@ -293,12 +285,10 @@ class TestStubGetAvailableFactDates:
     async def test_tomorrow_is_in_dates(self) -> None:
         """tomorrow_ts (today_ts + 86400) також присутній у стабі."""
         r = await self._response()
-        today    = datetime.date.fromtimestamp(r.fact.today_ts)
+        today = datetime.date.fromtimestamp(r.fact.today_ts)
         tomorrow = today + datetime.timedelta(days=1)
-        dates    = StubDtekClient.get_available_fact_dates(r)
-        assert tomorrow in dates, (
-            f"Очікувалось {tomorrow} серед дат факту стаба, отримано: {dates}"
-        )
+        dates = StubDtekClient.get_available_fact_dates(r)
+        assert tomorrow in dates, f"Очікувалось {tomorrow} серед дат факту стаба, отримано: {dates}"
 
     async def test_no_fact_returns_empty_list(self) -> None:
         """Якщо fact=None — повертає [], без винятку."""
