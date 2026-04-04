@@ -95,6 +95,7 @@ in two ways:
 | Poetry | 1.8+ | `pip install poetry` |
 | Git | any | [git-scm.com](https://git-scm.com) |
 | Playwright (optional) | latest | `poetry run playwright install chromium` |
+| tzdata | latest | `poetry add tzdata` |
 
 ### Setup
 
@@ -166,7 +167,7 @@ dtek-blackout-client/
   `.json()` as a plain method, not a coroutine.
 - `StubDtekClient` uses `model_construct()` to bypass model validators (which
   expect raw AJAX dicts), so it can build models from pre-constructed objects.
-
+- Timezone Handling: The library uses zoneinfo with Europe/Kyiv timezone for all date conversions. To ensure this works on Windows (which lacks a native IANA database), we've added tzdata as a dependency.
 ---
 
 ## 4. Manual testing
@@ -293,7 +294,8 @@ What the stub returns:
 | `get_home_num("м. Українка", "вул. Юності")` | 9 houses with groups GPV3.1, GPV3.2, GPV4.1 |
 | `get_group_by_address("м. Українка", "вул. Юності", "1/1")` | GPV3.2 |
 | `get_today_schedule("м. Українка", "вул. Юності", "1")` | Slots 1–8 and 37–44 = `NO` (outage) |
-
+| `get_available_fact_dates(res)` | Returns Today and Tomorrow |
+| `get_tomorrow_schedule(...)` | Returns a realistic slot map for the next day |
 ---
 
 ## 8. Publishing to PyPI
@@ -608,6 +610,7 @@ POST <ajaxUrl>
 | Poetry | 1.8+ | `pip install poetry` |
 | Git | будь-яка | [git-scm.com](https://git-scm.com) |
 | Playwright (опційно) | остання | `poetry run playwright install chromium` |
+| tzdata | остання | `poetry add tzdata` |
 
 ### Налаштування
 
@@ -679,7 +682,7 @@ dtek-blackout-client/
   `.json()` як звичайний метод, не корутину.
 - `StubDtekClient` використовує `model_construct()` для обходу валідаторів моделей
   (які очікують сирі AJAX-словники), щоб будувати моделі з вже сконструйованих об'єктів.
-
+- Обробка часового поясу: Бібліотека використовує zoneinfo з часовим поясом Europe/Kyiv для всіх перетворень дат. Щоб забезпечити роботу у Windows (якій бракує власної бази даних IANA), ми додали tzdata як залежність.
 ---
 
 ## 4. Ручне тестування
@@ -806,6 +809,8 @@ from dtek_client import DtekClient
 | `get_home_num("м. Українка", "вул. Юності")` | 9 будинків з групами GPV3.1, GPV3.2, GPV4.1 |
 | `get_group_by_address("м. Українка", "вул. Юності", "1/1")` | GPV3.2 |
 | `get_today_schedule("м. Українка", "вул. Юності", "1")` | Слоти 1–8 та 37–44 = `NO` (відключення) |
+| `get_available_fact_dates(res)` | Повернення сьогодні та завтра |
+| `get_tomorrow_schedule(...)` | Повертає реалістичну карту слотів на наступний день |
 
 ---
 
