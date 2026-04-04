@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import copy
+import datetime
 import pytest
 
 from dtek_client import DtekClient
@@ -722,3 +724,268 @@ class TestGetHomeNumGlobalSchedule:
         client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
         with pytest.raises(DtekDataError):
             await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+
+
+# ── Fixtures for new-method tests ─────────────────────────────────────────────
+
+# today_ts у fixtures/home_num_response.json = 1774483200
+_TODAY_TS   = 1774483200
+_TOMORROW_TS = _TODAY_TS + 86400
+
+
+@pytest.fixture
+def home_num_raw_with_tomorrow(home_num_raw: dict) -> dict:
+    """home_num_raw з доданим tomorrow_ts у fact.data.
+
+    Копіює слоти сьогодні під ключем tomorrow_ts, щоб get_tomorrow_schedule()
+    і get_schedule_for_date(..., tomorrow) мали що повертати.
+    """
+    raw = copy.deepcopy(home_num_raw)
+    today_slots = raw["fact"]["data"].get(str(_TODAY_TS), {})
+    raw["fact"]["data"][str(_TOMORROW_TS)] = copy.deepcopy(today_slots)
+    return raw
+
+
+# ── get_tomorrow_schedule ─────────────────────────────────────────────────────
+
+
+class TestGetTomorrowSchedule:
+    async def test_returns_slot_map_when_tomorrow_in_fact(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw_with_tomorrow: dict,
+    ) -> None:
+        """Якщо tomorrow_ts є у fact.data — повертає dict зі SlotStatus."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
+        assert result is not None
+        assert isinstance(result, dict)
+
+    async def test_returns_none_when_tomorrow_absent(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw: dict,
+    ) -> None:
+        """Якщо tomorrow_ts відсутній у fact.data — повертає None."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
+        assert result is None
+
+    async def test_slot_values_are_slot_status(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw_with_tomorrow: dict,
+    ) -> None:
+        """Усі значення у поверненому словнику — SlotStatus."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
+        assert result is not None
+        for v in result.values():
+            assert isinstance(v, SlotStatus)
+
+    async def test_house_not_found_returns_none(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw_with_tomorrow: dict,
+    ) -> None:
+        """Неіснуючий будинок → None."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "999")
+        assert result is None
+
+    async def test_no_fact_returns_none(self, client_with_ajax: DtekClient) -> None:
+        """Якщо у відповіді взагалі немає fact — повертає None."""
+        raw: dict[str, Any] = {
+            "data": {
+                "1": {
+                    "sub_type_reason": ["GPV3.1"],
+                    "sub_type": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "type": "",
+                    "voluntarily": None,
+                }
+            },
+            "showCurSchedule": False,
+            "showTablePlan": False,
+            "showTableFact": False,
+            "showTableSchedule": False,
+        }
+        client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
+        assert result is None
+
+    async def test_tomorrow_uses_today_ts_plus_86400(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw_with_tomorrow: dict,
+    ) -> None:
+        """Метод шукає саме today_ts + 86400, а не будь-який інший ключ."""
+        raw = copy.deepcopy(home_num_raw_with_tomorrow)
+        # Видаляємо tomorrow_ts → метод повинен повернути None
+        del raw["fact"]["data"][str(_TOMORROW_TS)]
+        client_with_ajax._post = AsyncMock(return_value=raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
+        assert result is None
+
+
+# ── get_schedule_for_date ─────────────────────────────────────────────────────
+
+
+class TestGetScheduleForDate:
+    _today    = datetime.date.fromtimestamp(_TODAY_TS)
+    _tomorrow = datetime.date.fromtimestamp(_TOMORROW_TS)
+
+    async def test_today_equals_get_today_schedule(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw: dict,
+    ) -> None:
+        """get_schedule_for_date(today) == get_today_schedule()."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        today_direct = await client_with_ajax.get_today_schedule(
+            "м. Українка", "вул. Юності", "1"
+        )
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        today_via_dt = await client_with_ajax.get_schedule_for_date(
+            "м. Українка", "вул. Юності", "1", self._today
+        )
+        assert today_direct == today_via_dt
+
+    async def test_tomorrow_equals_get_tomorrow_schedule(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw_with_tomorrow: dict,
+    ) -> None:
+        """get_schedule_for_date(tomorrow) == get_tomorrow_schedule()."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        via_tmrw = await client_with_ajax.get_tomorrow_schedule(
+            "м. Українка", "вул. Юності", "1"
+        )
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        via_date = await client_with_ajax.get_schedule_for_date(
+            "м. Українка", "вул. Юності", "1", self._tomorrow
+        )
+        assert via_tmrw == via_date
+
+    async def test_date_not_in_fact_returns_none(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw: dict,
+    ) -> None:
+        """Дата, якої немає в fact.data, повертає None."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        far_future = datetime.date(2099, 1, 1)
+        result = await client_with_ajax.get_schedule_for_date(
+            "м. Українка", "вул. Юності", "1", far_future
+        )
+        assert result is None
+
+    async def test_slot_values_are_slot_status(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw: dict,
+    ) -> None:
+        """Усі значення повернутого словника — SlotStatus."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_schedule_for_date(
+            "м. Українка", "вул. Юності", "1", self._today
+        )
+        if result is not None:
+            for v in result.values():
+                assert isinstance(v, SlotStatus)
+
+    async def test_unknown_house_returns_none(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw: dict,
+    ) -> None:
+        """Неіснуючий будинок → None для будь-якої дати."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_schedule_for_date(
+            "м. Українка", "вул. Юності", "999", self._today
+        )
+        assert result is None
+
+    async def test_accepts_datetime_date_type(
+        self,
+        client_with_ajax: DtekClient,
+        home_num_raw: dict,
+    ) -> None:
+        """Параметр date — саме datetime.date, не рядок і не int."""
+        assert isinstance(self._today, datetime.date)
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        result = await client_with_ajax.get_schedule_for_date(
+            "м. Українка", "вул. Юності", "1", self._today
+        )
+        assert result is None or isinstance(result, dict)
+
+
+# ── get_available_fact_dates ──────────────────────────────────────────────────
+
+
+class TestGetAvailableFactDates:
+    async def test_returns_list_of_dates(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        """Повертає list[datetime.date]."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        response = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        dates = DtekClient.get_available_fact_dates(response)
+        assert isinstance(dates, list)
+        assert all(isinstance(d, datetime.date) for d in dates)
+
+    async def test_today_present_in_dates(
+        self, client_with_ajax: DtekClient, home_num_raw: dict
+    ) -> None:
+        """today_ts з fact повинен бути серед повернених дат."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw)  # type: ignore[method-assign]
+        response = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        today = datetime.date.fromtimestamp(_TODAY_TS)
+        dates = DtekClient.get_available_fact_dates(response)
+        assert today in dates
+
+    async def test_dates_sorted_ascending(
+        self, client_with_ajax: DtekClient, home_num_raw_with_tomorrow: dict
+    ) -> None:
+        """Список відсортований від найранішої до найпізнішої."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        response = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        dates = DtekClient.get_available_fact_dates(response)
+        assert dates == sorted(dates)
+
+    async def test_tomorrow_present_when_in_fact(
+        self, client_with_ajax: DtekClient, home_num_raw_with_tomorrow: dict
+    ) -> None:
+        """Якщо tomorrow_ts є у fact.data — він відображається у результаті."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        response = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        tomorrow = datetime.date.fromtimestamp(_TOMORROW_TS)
+        dates = DtekClient.get_available_fact_dates(response)
+        assert tomorrow in dates
+
+    async def test_count_matches_fact_days(
+        self, client_with_ajax: DtekClient, home_num_raw_with_tomorrow: dict
+    ) -> None:
+        """len(dates) == len(fact.days)."""
+        client_with_ajax._post = AsyncMock(return_value=home_num_raw_with_tomorrow)  # type: ignore[method-assign]
+        response = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
+        dates = DtekClient.get_available_fact_dates(response)
+        assert len(dates) == len(response.fact.days)
+
+    async def test_no_fact_returns_empty_list(
+        self, client_with_ajax: DtekClient
+    ) -> None:
+        """Якщо fact=None — повертає [], без винятку."""
+        response = HomeNumResponse.model_construct(
+            houses={},
+            preset=None,
+            fact=None,
+            show_cur_schedule=False,
+            show_table_plan=False,
+            show_table_fact=False,
+            show_table_schedule=False,
+            update_timestamp="",
+        )
+        result = DtekClient.get_available_fact_dates(response)
+        assert result == []
