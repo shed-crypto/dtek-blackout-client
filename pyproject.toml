@@ -1,6 +1,6 @@
 [project]
 name = "dtek-blackout-client"
-version = "0.1.10"
+version = "0.1.11"
 description = "Async Python client for DTEK regional electricity-outage schedule sites"
 authors = [
     {name = "Rachenko", email = "alexey.rachenko@gmail.com"}
@@ -26,7 +26,8 @@ dependencies = [
     "pydantic (>=2.12.5,<3.0.0)",
     # playwright is used by browser_auth.py to bypass Incapsula/Imperva WAF challenges.
     "playwright (>=1.58.0,<2.0.0)",
-    "tzdata (>=2026.1,<2027.0)"
+    "tzdata (>=2026.1,<2027.0)",
+    "playwright-stealth (>=2.0.3,<3.0.0)"
 ]
 
 [project.urls]

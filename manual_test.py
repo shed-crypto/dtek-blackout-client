@@ -30,7 +30,7 @@ def suggest_houses(all_houses: dict, query: str) -> list[str]:
 async def create_session(base_url: str) -> AsyncSession:
     """Допоміжна функція для проходження WAF та налаштування сесії для конкретного сайту."""
     schedule_url = f"{base_url}/ua/shutdowns"
-    cookies, csrf_token = await get_cleared_cookies(schedule_url)
+    cookies, csrf_token = await get_cleared_cookies(schedule_url, True)
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -568,7 +568,7 @@ async def test_fact_real() -> None:
 
 async def main() -> None:
     #await test_stub()   # Спочатку тестуємо стаб (швидко, без мережі)
-    #await test_krem()   # Тестуємо Київську область
+    await test_krem()   # Тестуємо Київську область
     #await test_oem()    # Тестуємо Одесу
     #await test_kem()    # Тестуємо Київ (місто)
     #await test_autocomplete_stub() # Тестуємо автозавершення локально

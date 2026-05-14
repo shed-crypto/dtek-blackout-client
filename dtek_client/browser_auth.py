@@ -17,24 +17,31 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import asyncio
 import logging
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 
+from playwright_stealth import Stealth
+
 from .exceptions import DtekConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def get_cleared_cookies(url: str) -> tuple[dict[str, str], str | None]:
+async def get_cleared_cookies(
+    url: str, 
+    show_browser: bool = False
+) -> tuple[dict[str, str], str | None]:
     """Launch a headless browser, wait for the WAF challenge to clear, and
     return a tuple of ``(cookies, csrf_token)``.
 
     Args:
         url: the schedule page URL (e.g. "https://www.dtek-krem.com.ua/ua/shutdowns").
-
+        show_browser: If True, launches non-headless browser to allow manual 
+                     Cloudflare/WAF bypass.
     Returns:
         A tuple of:
             - ``cookies`` – dict of cookie name → value, ready to pass to curl_cffi.
@@ -42,30 +49,40 @@ async def get_cleared_cookies(url: str) -> tuple[dict[str, str], str | None]:
     """
     _LOGGER.info("Launching Playwright to bypass WAF for %s...", url)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+    async with Stealth().use_async(async_playwright()) as p:
+        browser = await p.chromium.launch(headless=not show_browser)
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
+                "Chrome/124.0.0.0 Safari/537.36"
             )
         )
         page = await context.new_page()
 
         _LOGGER.debug("Navigating to %s", url)
         try:
-            await page.goto(url, wait_until="networkidle")
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         except PlaywrightError as e:
             await browser.close()
             raise DtekConnectionError(f"Failed to load page to bypass WAF: {e}") from e
 
-        # Allow extra time for the WAF JS challenge to complete.
-        _LOGGER.debug("Waiting for WAF JS challenge to resolve...")
-        await asyncio.sleep(4)
+        # Handle Cloudflare / WAF verification
+        if show_browser:
+            _LOGGER.info("Waiting for manual verification in the browser window...")
+        try:
+            # Wait for the site to actually load (indicated by the CSRF token meta tag)
+            await page.wait_for_selector('meta[name="csrf-token"]', state="attached", timeout=60000)
+            _LOGGER.info("Page loaded successfully, challenge cleared.")
+        except PlaywrightError:
+            _LOGGER.warning("Timeout waiting for page to load after challenge.")
 
         # Extract the Yii2 CSRF token from the page meta tag.
-        csrf_token = await page.get_attribute('meta[name="csrf-token"]', "content")
+        try:
+            csrf_token = await page.get_attribute('meta[name="csrf-token"]', "content")
+        except PlaywrightError:
+            csrf_token = None
+            
         if csrf_token:
             _LOGGER.info("Successfully extracted CSRF token.")
         else:

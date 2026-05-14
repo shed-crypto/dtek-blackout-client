@@ -61,6 +61,11 @@ Or with Poetry:
 poetry add dtek-blackout-client
 ```
 
+WAF bypass
+```bash
+# Required for WAF bypass:
+playwright install chromium
+```
 ---
 
 ## Quick start
@@ -304,6 +309,16 @@ async with DtekClient("krem") as client:
 The stub returns realistic data for `м. Українка` / `м. Обухів` with groups
 `GPV3.1`, `GPV3.2`, `GPV4.1` and a matching preset + today's fact schedule.
 
+## Cloudflare / WAF Bypass
+
+DTEK websites use aggressive WAF protection (Imperva/Cloudflare). This library uses `playwright` to bypass it. 
+
+If you encounter timeouts or 403 errors in a headless environment, you can run the client in "GUI mode" once to solve the challenge manually:
+
+```python
+# In your implementation
+cookies, token = await get_cleared_cookies(url, show_browser=True)
+```
 ---
 
 ## Development
@@ -319,8 +334,8 @@ poetry run pytest
 
 Expected output:
 ```
-174 passed in 6.41s
-Total coverage: 99.83%
+213 passed in 6.11s
+Total coverage: 98.81%
 ```
 
 ---
@@ -396,6 +411,12 @@ pip install dtek-blackout-client
 poetry add dtek-blackout-client
 ```
 
+
+WAF bypass
+```bash
+# Необхідно для обходу WAF:
+playwright install chromium
+```
 ---
 
 ## Швидкий старт
@@ -640,6 +661,18 @@ async with DtekClient("krem") as client:
 Стаб повертає реалістичні дані для `м. Українка` / `м. Обухів` з групами
 `GPV3.1`, `GPV3.2`, `GPV4.1` та відповідним preset + фактичним графіком на сьогодні.
 
+
+## Cloudflare / WAF Bypass
+
+Вебсайти DTEK використовують агресивний захист WAF (Imperva/Cloudflare). Ця бібліотека використовує `playwright` для його обходу.
+
+Якщо у вас виникли тайм-аути або помилки 403 у середовищі без headless, ви можете один раз запустити клієнт у "режимі графічного інтерфейсу", щоб вирішити проблему вручну:
+
+```python
+# У вашій реалізації
+cookies, token = await get_cleared_cookies(url, show_browser=True)
+```
+
 ---
 
 ## Розробка
@@ -655,8 +688,8 @@ poetry run pytest
 
 Очікуваний вивід:
 ```
-174 passed in 6.41s
-Total coverage: 99.83%
+213 passed in 6.11s
+Total coverage: 98.81%
 ```
 
 ---
