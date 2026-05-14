@@ -17,14 +17,11 @@ Usage::
 
 from __future__ import annotations
 
-import os
-import asyncio
 import logging
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
-
-from playwright_stealth import Stealth
+from playwright_stealth import Stealth  # type: ignore
 
 from .exceptions import DtekConnectionError
 
@@ -32,15 +29,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def get_cleared_cookies(
-    url: str, 
-    show_browser: bool = False
+    url: str, show_browser: bool = False
 ) -> tuple[dict[str, str], str | None]:
     """Launch a headless browser, wait for the WAF challenge to clear, and
     return a tuple of ``(cookies, csrf_token)``.
 
     Args:
         url: the schedule page URL (e.g. "https://www.dtek-krem.com.ua/ua/shutdowns").
-        show_browser: If True, launches non-headless browser to allow manual 
+        show_browser: If True, launches non-headless browser to allow manual
                      Cloudflare/WAF bypass.
     Returns:
         A tuple of:
@@ -82,7 +78,7 @@ async def get_cleared_cookies(
             csrf_token = await page.get_attribute('meta[name="csrf-token"]', "content")
         except PlaywrightError:
             csrf_token = None
-            
+
         if csrf_token:
             _LOGGER.info("Successfully extracted CSRF token.")
         else:

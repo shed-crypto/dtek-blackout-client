@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from dtek_client.exceptions import (
     DtekAPIError,
     DtekClientError,

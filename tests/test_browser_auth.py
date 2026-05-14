@@ -9,17 +9,16 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from playwright.async_api import Error as PlaywrightError
 
 from dtek_client.browser_auth import get_cleared_cookies
-
-from playwright.async_api import Error as PlaywrightError
 from dtek_client.exceptions import DtekConnectionError
 
 # ── Fixture helpers ───────────────────────────────────────────────────────────
 
 
 def _make_playwright_stack(
-    csrf_token: str | None = "test-csrf-token",
+    csrf_token: str | None = "test-csrf-token",  # noqa: S107
     cookies: list[dict] | None = None,
 ) -> tuple[MagicMock, MagicMock, MagicMock, MagicMock]:
     """Return (pw_context_manager, page, browser_context, browser).
@@ -36,6 +35,8 @@ def _make_playwright_stack(
     page = MagicMock()
     page.goto = AsyncMock()
     page.get_attribute = AsyncMock(return_value=csrf_token)
+
+    page.wait_for_selector = AsyncMock()
 
     browser_context = MagicMock()
     browser_context.new_page = AsyncMock(return_value=page)
@@ -65,7 +66,7 @@ class TestReturnValues:
     async def test_csrf_token_is_returned_when_found(self) -> None:
         """get_cleared_cookies returns the CSRF token extracted from the
         <meta name="csrf-token"> tag when it is present on the page."""
-        pw_cm, *_ = _make_playwright_stack(csrf_token="prod-csrf-abc")
+        pw_cm, *_ = _make_playwright_stack(csrf_token="prod-csrf-abc")  # noqa: S106
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
@@ -153,7 +154,7 @@ class TestPlaywrightInteractions:
 
     async def test_page_navigates_to_the_provided_url(self) -> None:
         """page.goto must be called with the exact URL supplied by the caller
-        and wait_until='networkidle' so the WAF challenge has time to resolve."""
+        and wait_until='domcontentloaded' with a 60s timeout."""
         pw_cm, page, _, _ = _make_playwright_stack()
         url = "https://www.dtek-krem.com.ua/ua/shutdowns"
 
@@ -163,7 +164,7 @@ class TestPlaywrightInteractions:
         ):
             await get_cleared_cookies(url)
 
-        page.goto.assert_awaited_once_with(url, wait_until="networkidle")
+        page.goto.assert_awaited_once_with(url, wait_until="domcontentloaded", timeout=60000)
 
     async def test_csrf_extracted_from_correct_meta_selector(self) -> None:
         """get_attribute must query exactly meta[name="csrf-token"] / "content"
@@ -178,19 +179,19 @@ class TestPlaywrightInteractions:
 
         page.get_attribute.assert_awaited_once_with('meta[name="csrf-token"]', "content")
 
-    async def test_waf_delay_is_awaited_once(self) -> None:
-        """asyncio.sleep(4) is called once to give the Incapsula/Imperva
-        JS challenge enough time to complete before cookies are collected."""
-        pw_cm, *_ = _make_playwright_stack()
-        sleep_mock = AsyncMock()
+    async def test_waf_challenge_waits_for_selector(self) -> None:
+        """The client smartly waits for the csrf-token meta tag instead of hardcoded sleep."""
+        pw_cm, page, _, _ = _make_playwright_stack()
 
         with (
             patch("dtek_client.browser_auth.async_playwright", return_value=pw_cm),
-            patch("dtek_client.browser_auth.asyncio.sleep", new=sleep_mock),
+            patch("dtek_client.browser_auth.asyncio.sleep", new=AsyncMock()),
         ):
             await get_cleared_cookies("https://example.com")
 
-        sleep_mock.assert_awaited_once_with(4)
+        page.wait_for_selector.assert_awaited_once_with(
+            'meta[name="csrf-token"]', state="attached", timeout=60000
+        )
 
     async def test_browser_is_closed_after_successful_run(self) -> None:
         """browser.close() must always be awaited so no Chromium process is

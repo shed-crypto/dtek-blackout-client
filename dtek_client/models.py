@@ -20,11 +20,14 @@ All models are frozen=True — safe to pass between coroutines.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _FrozenModel(BaseModel):
@@ -143,31 +146,52 @@ class PresetSchedule(_FrozenModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data: dict[str, Any] = data.get("data", {})
+        raw_data = data.get("data", {})
+
+        if isinstance(raw_data, list):
+            if len(raw_data) == 0:
+                raw_data = {}
+            else:
+                _LOGGER.warning("preset.data is a non-empty list. Unexpected DTEK API format.")
+                raw_data = {}
+
         groups: dict[str, GroupWeekSchedule] = {}
 
-        for group_id, day_map in raw_data.items():
-            if not isinstance(day_map, dict):
-                continue
-            days_parsed: dict[int, WeekDaySchedule] = {}
-            for day_str, slot_map in day_map.items():
-                try:
-                    day_idx = int(day_str)
-                except (ValueError, TypeError):
+        if isinstance(raw_data, dict):
+            for group_id, day_map in raw_data.items():
+                if not isinstance(day_map, dict):
                     continue
-                if isinstance(slot_map, dict):
-                    days_parsed[day_idx] = WeekDaySchedule.model_validate(slot_map)
-            groups[group_id] = GroupWeekSchedule(group_id=group_id, days=days_parsed)
+                days_parsed: dict[int, WeekDaySchedule] = {}
+                for day_str, slot_map in day_map.items():
+                    try:
+                        day_idx = int(day_str)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(slot_map, dict):
+                        days_parsed[day_idx] = WeekDaySchedule.model_validate(slot_map)
+                groups[group_id] = GroupWeekSchedule(group_id=group_id, days=days_parsed)
 
-        # time_zone values may be arrays like ["00:00–00:30", "00:00"] — take first.
-        raw_tz: dict[str, Any] = data.get("time_zone", {})
-        time_zone = {k: (v[0] if isinstance(v, list) else str(v)) for k, v in raw_tz.items()}
+        raw_tz = data.get("time_zone", {})
+        if isinstance(raw_tz, list) and len(raw_tz) == 0:
+            raw_tz = {}
+        time_zone = (
+            {k: (v[0] if isinstance(v, list) else str(v)) for k, v in raw_tz.items()}
+            if isinstance(raw_tz, dict)
+            else {}
+        )
 
-        # days may come with string keys {"1": "Понеділок", …}.
-        raw_days: dict[str, Any] = data.get("days", {})
-        days_out = {int(k): str(v) for k, v in raw_days.items() if str(k).isdigit()}
+        raw_days = data.get("days", {})
+        if isinstance(raw_days, list) and len(raw_days) == 0:
+            raw_days = {}
+        days_out = {
+            int(k): str(v)
+            for k, v in raw_days.items()
+            if isinstance(raw_days, dict) and str(k).isdigit()
+        }
 
-        sch_names: dict[str, Any] = data.get("sch_names", {})
+        sch_names = data.get("sch_names", {})
+        if isinstance(sch_names, list) and len(sch_names) == 0:
+            sch_names = {}
 
         # is_active: False when time_zone or data is empty.
         is_active = bool(time_zone) and bool(raw_data)
@@ -175,7 +199,11 @@ class PresetSchedule(_FrozenModel):
         return {
             "groups": groups,
             "time_zone": time_zone,
-            "sch_names": {str(k): str(v) for k, v in sch_names.items()},
+            "sch_names": (
+                {str(k): str(v) for k, v in sch_names.items()}
+                if isinstance(sch_names, dict)
+                else {}
+            ),
             "days": days_out,
             "is_active": is_active,
         }
@@ -235,18 +263,27 @@ class FactSchedule(_FrozenModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data: dict[str, Any] = data.get("data", {})
+        raw_data = data.get("data", {})
+
+        if isinstance(raw_data, list):
+            if len(raw_data) == 0:
+                raw_data = {}
+            else:
+                _LOGGER.warning("fact.data is a non-empty list. Unexpected DTEK API format.")
+                raw_data = {}
+
         days: dict[str, dict[str, dict[str, SlotStatus]]] = {}
 
-        for ts_str, group_map in raw_data.items():
-            if not isinstance(group_map, dict):
-                continue
-            day_entry: dict[str, dict[str, SlotStatus]] = {}
-            for group_id, slot_map in group_map.items():
-                if not isinstance(slot_map, dict):
+        if isinstance(raw_data, dict):
+            for ts_str, group_map in raw_data.items():
+                if not isinstance(group_map, dict):
                     continue
-                day_entry[group_id] = {k: SlotStatus(v) for k, v in slot_map.items()}
-            days[ts_str] = day_entry
+                day_entry: dict[str, dict[str, SlotStatus]] = {}
+                for group_id, slot_map in group_map.items():
+                    if not isinstance(slot_map, dict):
+                        continue
+                    day_entry[group_id] = {k: SlotStatus(v) for k, v in slot_map.items()}
+                days[ts_str] = day_entry
 
         return {
             "today_ts": int(data.get("today", 0)),
@@ -351,20 +388,58 @@ class HomeNumResponse(_FrozenModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data: dict[str, Any] = data.get("data", {})
+        raw_data = data.get("data", {})
         houses: dict[str, HouseEntry] = {}
-        for house_num, entry in raw_data.items():
-            if not isinstance(entry, dict):
-                continue
-            houses[house_num] = HouseEntry(
-                house_number=house_num,
-                group_ids=entry.get("sub_type_reason", []),
-                sub_type=entry.get("sub_type", ""),
-                start_date=entry.get("start_date", ""),
-                end_date=entry.get("end_date", ""),
-                type=entry.get("type", ""),
-                voluntarily=entry.get("voluntarily"),
+
+        if isinstance(raw_data, list):
+            # New API format (observed ~2025-05): data is a list of house objects.
+            _LOGGER.debug(
+                "getHomeNum: 'data' is a list (%d items) — using list parser. "
+                "First item keys: %s",
+                len(raw_data),
+                list(raw_data[0].keys()) if raw_data else [],
             )
+            for entry in raw_data:
+                if not isinstance(entry, dict):
+                    continue
+                # Try known key names for the house number field.
+                house_num = (
+                    entry.get("num")
+                    or entry.get("house_num")
+                    or entry.get("house_number")
+                    or entry.get("name")
+                    or entry.get("id")
+                )
+                if house_num is None:
+                    _LOGGER.warning(
+                        "getHomeNum list item has no recognised house-number key: %s", entry
+                    )
+                    continue
+                house_num = str(house_num)
+                houses[house_num] = HouseEntry(
+                    house_number=house_num,
+                    group_ids=entry.get("sub_type_reason", []),
+                    sub_type=entry.get("sub_type", ""),
+                    start_date=entry.get("start_date", ""),
+                    end_date=entry.get("end_date", ""),
+                    type=entry.get("type", ""),
+                    voluntarily=entry.get("voluntarily"),
+                )
+        elif isinstance(raw_data, dict):
+            for house_num, entry in raw_data.items():
+                if not isinstance(entry, dict):
+                    continue
+                houses[house_num] = HouseEntry(
+                    house_number=house_num,
+                    group_ids=entry.get("sub_type_reason", []),
+                    sub_type=entry.get("sub_type", ""),
+                    start_date=entry.get("start_date", ""),
+                    end_date=entry.get("end_date", ""),
+                    type=entry.get("type", ""),
+                    voluntarily=entry.get("voluntarily"),
+                )
+        else:
+            _LOGGER.warning("getHomeNum: unexpected 'data' type: %s", type(raw_data))
 
         result = dict(data)
         result["houses"] = houses

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import datetime
 
-import pytest
-
 from dtek_client.models import AddressResult, HomeNumResponse, SlotStatus, StreetSuggestion
 from dtek_client.stub_client import StubDtekClient
 

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import UTC, datetime
 
 import pytest
-
-from datetime import datetime, timezone
 from pydantic import ValidationError
 
 from dtek_client.models import (
     AddressResult,
+    FactDaySchedule,
     FactSchedule,
     HomeNumResponse,
     HouseEntry,
@@ -18,9 +17,7 @@ from dtek_client.models import (
     SlotStatus,
     StreetSuggestion,
     WeekDaySchedule,
-    FactDaySchedule,
 )
-
 
 # ── SlotStatus ────────────────────────────────────────────────────────────────
 
@@ -264,9 +261,9 @@ class TestFactSchedule:
 
     def test_day_date_property(self, home_num_raw: dict) -> None:
         fact = FactSchedule.model_validate(home_num_raw["fact"])
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        dt = datetime.fromtimestamp(fact.today_ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(fact.today_ts, tz=UTC)
         assert dt.year == 2026
         assert dt.month == 3
 
@@ -384,7 +381,7 @@ class TestFactDayScheduleProperties:
     def test_day_date_returns_utc_aware_datetime(self) -> None:
         dt = self._make({}).day_date
         assert isinstance(dt, datetime)
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo == UTC
         assert dt.year == 2026 and dt.month == 3
 
 
@@ -467,3 +464,21 @@ class TestHomeNumResponseValidatorGuards:
         }
         r = HomeNumResponse.model_validate(raw)
         assert "99" not in r.houses
+
+
+def test_fact_schedule_empty_list_fallback() -> None:
+    """Checks that if DTEK returns an empty list instead of a dictionary for fact,
+    it is parsed safely."""
+    raw = {"today": 12345, "update": "now", "data": []}
+    fact = FactSchedule.model_validate(raw)
+    assert fact.today_ts == 12345
+    assert fact.days == {}
+
+
+def test_preset_schedule_empty_list_fallback() -> None:
+    """Checks that if DTEK returns an empty list for preset, it is parsed safely."""
+    raw = {"data": [], "time_zone": [], "days": [], "sch_names": []}
+    preset = PresetSchedule.model_validate(raw)
+    assert preset.groups == {}
+    assert preset.time_zone == {}
+    assert preset.is_active is False

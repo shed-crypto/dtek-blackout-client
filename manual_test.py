@@ -109,19 +109,19 @@ async def test_krem() -> None:
         
         async with DtekClient("krem", ajax_url=f"{base_url}/ua/ajax", session=session) as client:
             try:
-                print("\n--- Вулиці м. Українка ---")
-                streets = await client.get_streets("м. Українка")
+                print("\n--- Вулиці м. Фастів ---")
+                streets = await client.get_streets("м. Фастів")
                 for s in streets[:10]:
                     print(f"  {s.name}")
 
-                print("\n--- Будинки вул. Юності ---")
-                response = await client.get_home_num("м. Українка", "вул. Юності")
+                print("\n--- Будинки вул. Шевченка ---")
+                response = await client.get_home_num("м. Фастів", "вул. Шевченка")
                 for house, entry in sorted(response.houses.items()):
                     status = "виключено з графіку" if entry.is_excluded else entry.primary_group
                     print(f"  {house:6s} → {status}")
 
                 print("\n--- Розклад на сьогодні (факт) ---")
-                slots = await client.get_today_schedule("м. Українка", "вул. Юності", "10")
+                slots = await client.get_today_schedule("м. Фастів", "вул. Шевченка", "13")
                 if slots and response.preset:
                     for key, status in slots.items():
                         label = response.preset.time_zone.get(key, key)
@@ -569,7 +569,7 @@ async def test_fact_real() -> None:
 async def main() -> None:
     #await test_stub()   # Спочатку тестуємо стаб (швидко, без мережі)
     await test_krem()   # Тестуємо Київську область
-    #await test_oem()    # Тестуємо Одесу
+    await test_oem()    # Тестуємо Одесу
     #await test_kem()    # Тестуємо Київ (місто)
     #await test_autocomplete_stub() # Тестуємо автозавершення локально
     #await test_autocomplete_real() # Тестуємо автозавершення онлайн

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import copy
+import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import copy
-import datetime
 import pytest
 
 from dtek_client import DtekClient
@@ -22,7 +22,6 @@ from dtek_client.exceptions import (
 )
 from dtek_client.models import AddressResult, HomeNumResponse, SlotStatus
 from tests.conftest import make_mock_response
-
 
 # ── Constructor ───────────────────────────────────────────────────────────────
 

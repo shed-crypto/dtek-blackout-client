@@ -513,6 +513,25 @@ class DtekClient:
                         }
                     )
                     self._global_schedule = global_raw if isinstance(global_raw, dict) else {}
+                    # DEBUG: log structure to detect DTEK API format changes.
+                    if isinstance(global_raw, dict):
+                        _LOGGER.debug(
+                            "checkDisconUpdate keys: %s | "
+                            "preset.data type=%s | fact.data type=%s | "
+                            "getHomeNum data type=%s",
+                            list(global_raw.keys()),
+                            (
+                                type(global_raw.get("preset", {}).get("data")).__name__
+                                if isinstance(global_raw.get("preset"), dict)
+                                else "n/a"
+                            ),
+                            (
+                                type(global_raw.get("fact", {}).get("data")).__name__
+                                if isinstance(global_raw.get("fact"), dict)
+                                else "n/a"
+                            ),
+                            type(raw.get("data")).__name__,
+                        )
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch global schedule: %s", exc)
                     self._global_schedule = {}
