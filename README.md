@@ -334,8 +334,8 @@ poetry run pytest
 
 Expected output:
 ```
-213 passed in 6.11s
-Total coverage: 98.81%
+215 passed in 2.99s
+Total coverage: 96.09%
 ```
 
 ---
@@ -688,8 +688,8 @@ poetry run pytest
 
 Очікуваний вивід:
 ```
-213 passed in 6.11s
-Total coverage: 98.81%
+215 passed in 2.99s
+Total coverage: 96.09%
 ```
 
 ---

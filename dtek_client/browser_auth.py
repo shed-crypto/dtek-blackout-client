@@ -17,6 +17,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio  # noqa: F401
 import logging
 
 from playwright.async_api import Error as PlaywrightError
