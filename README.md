@@ -1,6 +1,6 @@
 # dtek-blackout-client
 
-> Async Python client for **DTEK** regional electricity-outage schedule sites  
+> Autonomous async scraping engine & Python client library for **DTEK** regional electricity-outage schedule sites
 
 [![CI](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml/badge.svg)](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/dtek-blackout-client.svg)](https://pypi.org/project/dtek-blackout-client/)
@@ -293,7 +293,6 @@ slots = await client.get_today_schedule(
     house_number=config["house_number"],
 )
 ```
-
 ### Development stub
 
 ```python
@@ -319,6 +318,11 @@ If you encounter timeouts or 403 errors in a headless environment, you can run t
 # In your implementation
 cookies, token = await get_cleared_cookies(url, show_browser=True)
 ```
+
+> [!NOTE]
+> **Architecture & Resource Note:**  
+> When integrating with lightweight environments (such as Home Assistant on Raspberry Pi / Alpine Linux without pre-installed Chromium), run WAF bypass workflows in an external background container/microservice rather than inside the main process to prevent out-of-memory issues.
+
 ---
 
 ## Development
@@ -349,7 +353,7 @@ Total coverage: 96.09%
 
 # dtek-blackout-client
 
-> Асинхронний Python-клієнт для сайтів регіональних графіків відключень електроенергії **DTEK**  
+> Автономний асинхронний рушій скрейпінгу та Python-клієнт для сайтів регіональних графіків відключень **DTEK**
 
 [![CI](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml/badge.svg)](https://github.com/shed-crypto/dtek-blackout-client/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/dtek-blackout-client.svg)](https://pypi.org/project/dtek-blackout-client/)
@@ -672,6 +676,10 @@ async with DtekClient("krem") as client:
 # У вашій реалізації
 cookies, token = await get_cleared_cookies(url, show_browser=True)
 ```
+
+> [!NOTE]
+> **Примітка щодо архітектури та ресурсів:**  
+> Якщо ви інтегруєте клієнт у середовища з обмеженими ресурсами (наприклад, Home Assistant на Raspberry Pi чи Alpine Linux без встановленого Chromium), обхід WAF рекомендується запускати у відокремленому фоновому сервісі або контейнері, щоб не перевантажувати основний процес і пам'ять.
 
 ---
 
