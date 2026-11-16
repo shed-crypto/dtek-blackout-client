@@ -285,6 +285,20 @@ class TestStubGetAvailableFactDates:
         result = StubDtekClient.get_available_fact_dates(response)
         assert result == []
 
+        from dtek_client.models import FactSchedule
+
+        bad_fact = FactSchedule.model_construct(
+            today_ts=1774483200,
+            update=None,
+            days={"not_a_number": {}},
+        )
+        bad_resp = HomeNumResponse.model_construct(houses={}, preset=None, fact=bad_fact)
+        assert StubDtekClient.get_available_fact_dates(bad_resp) == []
+
+    async def test_get_today_schedule_returns_none_for_unknown_house(self) -> None:
+        async with StubDtekClient() as c:
+            assert await c.get_today_schedule("м. Українка", "вул. Юності", "999") is None
+
     async def test_dates_count_matches_fact_days(self) -> None:
         r = await self._response()
         assert r.fact is not None
