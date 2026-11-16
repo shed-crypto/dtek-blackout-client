@@ -460,6 +460,47 @@ class TestSessionLifecycle:
         await client.close()
         created_session.close.assert_not_called()
 
+    async def test_lazy_session_creation_via_factory_without_explicit_connect(
+        self, streets_raw: dict[str, Any]
+    ) -> None:
+        lazy_session = MagicMock()
+        lazy_session.closed = False
+        lazy_session.cookie_jar = None
+        lazy_session.post = MagicMock(
+            return_value=make_mock_response(
+                status_code=200,
+                json_data=streets_raw,
+                cookies={"other_cookie": "ignored", "_csrf-dtek-krem": SAMPLE_CSRF_COOKIE},
+            )
+        )
+        client = DtekClient("krem", session_factory=lambda: lazy_session)
+        streets = await client.get_streets("м. Українка")
+        assert len(streets) > 0
+        assert client._session is lazy_session
+
+    async def test_handles_non_iterable_cookie_jar_gracefully(
+        self, streets_raw: dict[str, Any]
+    ) -> None:
+        session = MagicMock()
+        session.closed = False
+        bad_jar = MagicMock()
+        bad_jar.__iter__ = MagicMock(side_effect=TypeError("not iterable"))
+        bad_jar.clear = MagicMock(side_effect=TypeError("cannot clear"))
+        session.cookie_jar = bad_jar
+
+        first_400 = make_mock_response(status_code=400, text="Bad")
+        boot_400 = make_mock_response(
+            status_code=400,
+            text="Bad",
+            cookies={"_csrf-dtek-krem": SAMPLE_CSRF_COOKIE},
+        )
+        ok_200 = make_mock_response(status_code=200, json_data=streets_raw)
+        session.post = MagicMock(side_effect=[first_400, boot_400, ok_200])
+
+        client = DtekClient("krem", session=session, csrf_token="stale_csrf")  # noqa: S106
+        streets = await client.get_streets("м. Українка")
+        assert len(streets) > 0
+
 
 class TestPostRetryAndErrors:
     async def test_retries_on_server_error_then_succeeds(self, mock_session: MagicMock) -> None:
@@ -882,3 +923,25 @@ class TestGetAvailableFactDates:
     def test_ignores_invalid_timestamp_keys_and_handles_none_fact(self) -> None:
         no_fact = HomeNumResponse.model_construct(houses={}, preset=None, fact=None)
         assert DtekClient.get_available_fact_dates(no_fact) == []
+
+        from dtek_client.models import FactSchedule
+
+        bad_fact = FactSchedule.model_construct(
+            today_ts=_TODAY_TS,
+            update=None,
+            days={"invalid_ts": {}, str(_TODAY_TS): {}},
+        )
+        with_bad = HomeNumResponse.model_construct(houses={}, preset=None, fact=bad_fact)
+        dates = DtekClient.get_available_fact_dates(with_bad)
+        assert len(dates) == 1
+
+    async def test_get_tomorrow_schedule_returns_none_when_house_missing(
+        self, client_with_ajax: DtekClient, home_num_raw: dict[str, Any]
+    ) -> None:
+        parsed = HomeNumResponse.model_validate(home_num_raw)
+        assert (
+            await client_with_ajax.get_tomorrow_schedule(
+                "м. Українка", "вул. Юності", "999", response=parsed
+            )
+            is None
+        )

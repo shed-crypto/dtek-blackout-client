@@ -1,25 +1,31 @@
 classDiagram
 
-%% ── External interface ─────────────────────────────────────────────────────
     class DtekClient {
         +site_key: str
         +base_url: str
         +ajax_url: str | None
-        -_session: AsyncSession | None
+        -_session: ClientSession | None
+        -_session_factory: Callable | None
         -_ajax_url: str | None
         -_owns_session: bool
+        -_csrf_token: str | None
         -_global_schedule: dict | None
-        +__init__(site_key, ajax_url, timeout, retry_attempts, retry_delay, session)
+        +__init__(site_key, ajax_url, timeout, retry_attempts, retry_delay, session, session_factory, user_agent, csrf_token, discover_ajax_url)
         +connect() None
         +close() None
+        +get_all_streets() dict[str, list[str]]
         +get_streets(city) list[StreetSuggestion]
-        +get_home_num(city, street) HomeNumResponse
-        +get_group_by_address(city, street, house_number) AddressResult
-        +get_today_schedule(city, street, house_number) dict | None
+        +get_home_num(city, street, update_fact) HomeNumResponse
+        +get_group_by_address(city, street, house_number, update_fact, response) AddressResult
+        +get_today_schedule(city, street, house_number, update_fact, response) dict | None
+        +get_tomorrow_schedule(city, street, house_number, update_fact, response) dict | None
+        +get_schedule_for_date(city, street, house_number, date, update_fact, response) dict | None
+        +get_available_fact_dates(response) list[date]
         -_get_ajax_url() str
         -_fetch_page_html(path) str | None
+        -_ensure_csrf_token(ajax_url, stale) tuple
         -_post(data) Any
-        -_handle_response(response, url) Any
+        -_handle_response(status, text, headers, url) Any
         -_build_form(method, fields, update_fact) dict
     }
 
@@ -29,13 +35,16 @@ classDiagram
         +ajax_url: None
         +connect() None
         +close() None
+        +get_all_streets() dict[str, list[str]]
         +get_streets(city) list[StreetSuggestion]
-        +get_home_num(city, street) HomeNumResponse
-        +get_group_by_address(city, street, house_number) AddressResult
-        +get_today_schedule(city, street, house_number) dict | None
+        +get_home_num(city, street, update_fact) HomeNumResponse
+        +get_group_by_address(city, street, house_number, update_fact, response) AddressResult
+        +get_today_schedule(city, street, house_number, update_fact, response) dict | None
+        +get_tomorrow_schedule(city, street, house_number, update_fact, response) dict | None
+        +get_schedule_for_date(city, street, house_number, date, update_fact, response) dict | None
+        +get_available_fact_dates(response) list[date]
     }
 
-%% ── Models ─────────────────────────────────────────────────────────────────
     class SlotStatus {
         <<enumeration>>
         YES
@@ -82,10 +91,12 @@ classDiagram
 
     class FactSchedule {
         +today_ts: int
+        +today_date: date
         +update: str | None
         +days: dict
         +get_group_today(group_id) dict | None
         +get_group_day(ts, group_id) dict | None
+        +get_group_for_date(target_date, group_id) dict | None
     }
 
     class HouseEntry {
@@ -96,6 +107,7 @@ classDiagram
         +end_date: str
         +outage_type: str
         +voluntarily: bool | None
+        +external_operator: bool
         +is_multi_group: bool
         +is_excluded: bool
         +primary_group: str | None
@@ -107,10 +119,12 @@ classDiagram
         +preset: PresetSchedule | None
         +fact: FactSchedule | None
         +show_cur_schedule: bool
+        +show_cur_outage_param: bool
         +show_table_plan: bool
         +show_table_fact: bool
         +show_table_schedule: bool
         +update_timestamp: str | None
+        +find_house(house_number) HouseEntry | None
         +get_group_for_house(house_number) str | None
         +available_houses: list[str]
     }
@@ -128,13 +142,13 @@ classDiagram
         +group_display_name: str
     }
 
-%% ── Exceptions ─────────────────────────────────────────────────────────────
     class DtekClientError {
         +status_code: int | None
     }
     class DtekConnectionError
     class DtekTimeoutError { +timeout: float }
     class DtekSSLError
+    class DtekBlockedError
     class DtekAPIError
     class DtekUnauthorizedError
     class DtekNotFoundError { +path: str }
@@ -143,7 +157,6 @@ classDiagram
     class DtekDataError { +raw: object }
     class DtekSiteError
 
-%% ── Relationships ───────────────────────────────────────────────────────────
     DtekClient ..> HomeNumResponse : returns
     DtekClient ..> StreetSuggestion : returns
     DtekClient ..> AddressResult : returns
@@ -167,6 +180,7 @@ classDiagram
     DtekClientError <|-- DtekConnectionError
     DtekConnectionError <|-- DtekTimeoutError
     DtekConnectionError <|-- DtekSSLError
+    DtekConnectionError <|-- DtekBlockedError
     DtekClientError <|-- DtekAPIError
     DtekAPIError <|-- DtekUnauthorizedError
     DtekAPIError <|-- DtekNotFoundError
@@ -176,4 +190,4 @@ classDiagram
     DtekClientError <|-- DtekSiteError
 
     DtekClient ..> DtekClientError : raises
-    StubDtekClient ..|> DtekClient : «same interface»
+    StubDtekClient ..|> DtekClient : same interface
