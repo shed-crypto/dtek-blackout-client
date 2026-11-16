@@ -73,6 +73,9 @@ class TestStubGetHomeNum:
             r = await c.get_home_num("м. Українка", "вул. Юності")
         assert r.preset is not None
         assert r.preset.is_active is True
+        assert list(r.preset.time_zone.keys()) == [str(i) for i in range(1, 25)]
+        assert r.preset.time_zone["1"] == "00-01"
+        assert r.preset.time_zone["24"] == "23-24"
 
     async def test_fact_present(self) -> None:
         async with StubDtekClient() as c:
@@ -144,11 +147,14 @@ class TestStubGetTomorrowSchedule:
             for v in result.values():
                 assert isinstance(v, SlotStatus)
 
-    async def test_slot_count_is_48(self) -> None:
+    async def test_slot_count_is_24_matching_live_hourly_format(self) -> None:
         async with StubDtekClient() as c:
             result = await c.get_tomorrow_schedule("м. Українка", "вул. Юності", "1")
-        if result is not None:
-            assert len(result) == 48
+        assert result is not None
+        assert len(result) == 24
+        assert list(result.keys()) == [str(i) for i in range(1, 25)]
+        assert SlotStatus.FIRST in result.values()
+        assert SlotStatus.SECOND in result.values()
 
     async def test_unknown_house_returns_none(self) -> None:
         async with StubDtekClient() as c:
