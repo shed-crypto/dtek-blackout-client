@@ -33,12 +33,11 @@ Quick start::
     asyncio.run(main())
 
 Supported site_keys (DTEK regional sites):
-    "kem"  – DTEK Kyivenerho       (Kyiv city and oblast)
-    "krem" – DTEK Kyiv Regional    (Kyiv oblast, smaller towns)
-    "dnem" – DTEK Dnipro           (Dnipro, Dnipropetrovsk oblast)
-    "dem"  – DTEK Donetsk          (government-controlled Donetsk oblast)
-    "oem"  – DTEK Odesa            (Odesa, Odesa oblast)
-    "zem"  – DTEK Zaporizhzhia     (Zaporizhzhia)
+    "kem"  - DTEK Kyiv City Networks (Kyiv city)
+    "krem" - DTEK Kyiv Regional Networks (Kyiv oblast)
+    "dnem" - DTEK Dnipro Networks (Dnipropetrovsk oblast)
+    "dem"  - DTEK Donetsk Networks (Donetsk oblast)
+    "oem"  - DTEK Odesa Networks (Odesa oblast)
 """
 
 from importlib.metadata import PackageNotFoundError, version
