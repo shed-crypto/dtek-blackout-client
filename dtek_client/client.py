@@ -2,80 +2,76 @@
 
 Architecture
 ------------
-DTEK regional sites (e.g. dtek-kem.com.ua, dtek-krem.com.ua) are WordPress
-applications. They have no public REST API; the frontend communicates with the
-server through an AJAX endpoint whose URL is embedded in the schedule page as:
+DTEK regional sites (e.g. dtek-kem.com.ua, dtek-krem.com.ua) are Yii2 web
+applications. While HTML pages such as ``/ua/shutdowns`` are gated by an
+Imperva Incapsula JavaScript challenge, the AJAX endpoint ``POST /ua/ajax``
+is not challenged and is protected by Yii2 CSRF validation:
 
-    <meta name="ajaxUrl" content="https://...">
+1. A POST request without a token returns HTTP 400 and sets a signed
+   ``_csrf-dtek-<site>`` cookie containing the serialized 32-byte raw token.
+2. Subsequent POST requests succeed when ``X-CSRF-Token`` carries the masked
+   token: ``base64url(mask + (mask XOR token))``.
 
-Note: the meta content may be a relative path ("/ua/ajax"). In that case
-the client prepends base_url automatically.
-
-This client:
-  1. Fetches the schedule page (tries several paths) and extracts ajaxUrl (cached).
-  2. Sends form-encoded AJAX requests (method=getStreets / getHomeNum).
-  3. Parses responses into Pydantic models.
-
-Quick start::
-
-    async with DtekClient("krem") as client:
-        streets = await client.get_streets("м. Українка")
-        result  = await client.get_group_by_address(
-            city="м. Українка",
-            street="вул. Юності",
-            house_number="10",
-        )
-        print(result)
+This client uses ``aiohttp.ClientSession`` so it works standalone and inside
+Home Assistant without requiring a headless browser or native CFFI libraries.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
+import json
 import logging
 import re
-import urllib.parse
+import secrets
+from collections.abc import Callable, Mapping
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
-from curl_cffi.requests import AsyncSession
-from curl_cffi.requests.errors import RequestsError
+import aiohttp
 from pydantic import ValidationError
 
 from .const import (
+    CSRF_COOKIE_PREFIX,
     DEFAULT_RETRY_ATTEMPTS,
     DEFAULT_RETRY_DELAY,
     DEFAULT_SITE_KEY,
     DEFAULT_TIMEOUT,
+    DEFAULT_TIMEZONE,
     DTEK_SITES,
     FALLBACK_AJAX_PATH,
+    FORCE_UPDATE_FACT,
+    HTTP_BAD_REQUEST,
     HTTP_NOT_FOUND,
     HTTP_SERVER_ERROR,
     HTTP_TOO_MANY_REQUESTS,
     HTTP_UNAUTHORIZED,
     META_AJAX_URL,
+    METHOD_CHECK_UPDATE,
     METHOD_GET_HOME_NUM,
     METHOD_GET_STREETS,
     SCHEDULE_PAGE_FALLBACK_PATHS,
 )
 from .exceptions import (
     DtekAPIError,
+    DtekBlockedError,
     DtekConnectionError,
     DtekDataError,
     DtekNotFoundError,
     DtekRateLimitError,
     DtekServerError,
     DtekSiteError,
+    DtekSSLError,
+    DtekTimeoutError,
     DtekUnauthorizedError,
 )
-from .models import AddressResult, HomeNumResponse, StreetSuggestion
+from .models import AddressResult, HomeNumResponse, SlotStatus, StreetSuggestion
 
-__all__ = ["DtekClient"]
+__all__ = ["DtekClient", "extract_csrf_token", "mask_csrf_token"]
 _LOGGER = logging.getLogger(__name__)
 
-# ── ajaxUrl discovery patterns ────────────────────────────────────────────────
-# Pattern 1 & 2: <meta name="ajaxUrl" content="..."> (both attribute orderings)
 _META_RE = re.compile(
     r'<meta\s[^>]*name=["\']' + META_AJAX_URL + r'["\'][^>]*content=["\']([^"\']+)["\']',
     re.IGNORECASE,
@@ -84,65 +80,74 @@ _META_RE2 = re.compile(
     r'<meta\s[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']' + META_AJAX_URL + r'["\']',
     re.IGNORECASE,
 )
-# Pattern 3: var ajaxUrl = "...";
 _JS_VAR_RE = re.compile(
     r'var\s+ajaxUrl\s*=\s*["\']([^"\']+)["\']',
     re.IGNORECASE,
 )
-# Pattern 4: wp_localize_script / inline JS object  {"ajaxUrl":"..."}
 _JS_OBJ_RE = re.compile(
     r'["\']ajaxUrl["\']\s*:\s*["\']([^"\']+)["\']',
     re.IGNORECASE,
 )
-# Pattern 5: WordPress standard  {"ajax_url":"..."}
 _WP_AJAX_RE = re.compile(
     r'["\']ajax_url["\']\s*:\s*["\']([^"\']+)["\']',
     re.IGNORECASE,
 )
 
 _AJAX_PATTERNS = [_META_RE, _META_RE2, _JS_VAR_RE, _JS_OBJ_RE, _WP_AJAX_RE]
-
-# Markers that identify an Incapsula/Imperva WAF JavaScript challenge page.
 _INCAPSULA_MARKERS = ("_Incapsula_Resource", "visid_incap", "incap_ses")
+_CHALLENGE_MARKER = "_Incapsula_Resource"
+_CSRF_TOKEN_RE = re.compile(r'i:1;s:\d+:"([^"]+)"')
+
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def extract_csrf_token(cookie_value: str) -> str | None:
+    """Extract the raw token from a Yii2 serialized CSRF cookie value."""
+    match = _CSRF_TOKEN_RE.search(unquote(cookie_value))
+    return match.group(1) if match else None
+
+
+def mask_csrf_token(token: str, mask: bytes | None = None) -> str:
+    """Mask a raw token using the Yii2 Security::maskToken algorithm."""
+    raw = token.encode("utf-8")
+    if mask is None:
+        mask = secrets.token_bytes(len(raw))
+    masked = bytes(a ^ b for a, b in zip(mask, raw, strict=True))
+    return base64.urlsafe_b64encode(mask + masked).decode("ascii")
 
 
 def _resolve_ajax_url(raw: str, base_url: str) -> str:
-    """Resolve an ajaxUrl that may be a relative path.
-
-    DTEK sites sometimes return a relative path in <meta name="ajaxUrl">,
-    e.g. content="/ua/ajax".  This function converts it to an absolute URL.
-
-    Examples::
-
-        "/ua/ajax"           + "https://www.dtek-krem.com.ua" → "https://www.dtek-krem.com.ua/ua/ajax"
-        "https://..."        + any                             → "https://..."  (unchanged)
-        "/ua/register/ajax"  + "https://www.dtek-krem.com.ua" → "https://www.dtek-krem.com.ua/ua/register/ajax"
-    """
-    raw = raw.replace("\\/", "/").strip()
-    parsed = urlparse(raw)
+    """Resolve an ajaxUrl that may be a relative path against base_url."""
+    cleaned = raw.replace("\\/", "/").strip()
+    parsed = urlparse(cleaned)
     if parsed.scheme:
-        # Already a fully-qualified URL (http:// or https://).
-        return raw
-    # Relative path — join with base_url.
-    return urljoin(base_url, raw)
+        return cleaned
+    return urljoin(base_url, cleaned)
 
 
 class DtekClient:
     """Asynchronous client for DTEK regional disconnection-schedule sites.
 
     Args:
-        site_key: one of the keys defined in ``DTEK_SITES``
-                  (e.g. ``"kem"``, ``"krem"``, ``"oem"`` …).
-                  Defaults to ``"kem"`` (DTEK Kyivenerho).
-        ajax_url: if provided, skip the meta-tag discovery step and use this
-                  URL directly for AJAX requests.  Useful for testing or when
-                  the site is behind a WAF and you have the URL from DevTools.
-        timeout: per-request timeout in seconds.
-        retry_attempts: number of retries on transient 5xx errors.
-        retry_delay: seconds between retries (linear back-off).
-        session: inject an existing ``curl_cffi.requests.AsyncSession``.
-                 In Home Assistant, pass the result of ``async_get_clientsession(hass)``
-                 wrapped in an adapter, or let the client create its own session.
+        site_key: Regional key defined in ``DTEK_SITES`` (e.g. ``"kem"``, ``"krem"``).
+        ajax_url: Explicit AJAX endpoint URL. When omitted, ``base_url + /ua/ajax``
+                  is used unless ``discover_ajax_url=True`` is specified.
+        timeout: Per-request timeout in seconds.
+        retry_attempts: Number of attempts on transient 5xx responses.
+        retry_delay: Base delay in seconds between retries (linear back-off).
+        session: Existing ``aiohttp.ClientSession`` (for example, created via
+                 Home Assistant's ``async_create_clientsession``).
+        session_factory: Zero-argument callable that creates a new
+                         ``aiohttp.ClientSession`` if the current session is closed.
+        user_agent: Custom ``User-Agent`` header sent with requests.
+        csrf_token: Pre-configured CSRF token (raw or masked). When omitted,
+                    the client automatically bootstraps a token from ``/ua/ajax``.
+        discover_ajax_url: When True and ``ajax_url`` is None, fetch the HTML
+                           schedule page to discover ``<meta name="ajaxUrl">``.
     """
 
     def __init__(
@@ -153,7 +158,11 @@ class DtekClient:
         timeout: float = DEFAULT_TIMEOUT,
         retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
         retry_delay: float = DEFAULT_RETRY_DELAY,
-        session: AsyncSession[Any] | None = None,
+        session: aiohttp.ClientSession | None = None,
+        session_factory: Callable[[], aiohttp.ClientSession] | None = None,
+        user_agent: str | None = None,
+        csrf_token: str | None = None,
+        discover_ajax_url: bool = False,
     ) -> None:
         if site_key not in DTEK_SITES:
             raise DtekSiteError(
@@ -163,43 +172,56 @@ class DtekClient:
         self._site_key = site_key
         self._base_url, self._schedule_path = DTEK_SITES[site_key]
         self._ajax_url: str | None = ajax_url
+        self._discover_ajax_url = discover_ajax_url
         self._timeout = timeout
-        self._retry_attempts = retry_attempts
+        self._retry_attempts = max(1, retry_attempts)
         self._retry_delay = retry_delay
-        self._session: AsyncSession[Any] | None = session
-        # True when the client owns the session and must close it on exit.
-        self._owns_session: bool = session is None
-        # Cache for the global schedule fetched via checkDisconUpdate.
+        self._session: aiohttp.ClientSession | None = session
+        self._session_factory = session_factory
+        self._owns_session: bool = session is None and session_factory is None
+        self._user_agent = user_agent or DEFAULT_USER_AGENT
+        self._csrf_token: str | None = csrf_token
+        self._csrf_is_raw: bool = False
+        self._csrf_lock = asyncio.Lock()
         self._global_schedule: dict[str, Any] | None = None
+        self._streets_cache: dict[str, Any] | None = None
 
-    # ── Session lifecycle ─────────────────────────────────────────────────────
+    def _get_active_session(self) -> aiohttp.ClientSession:
+        """Return an open session, recreating it via session_factory if closed."""
+        if self._session is not None and getattr(self._session, "closed", False):
+            if self._session_factory is not None:
+                self._session = self._session_factory()
+                self._csrf_token = None
+                self._csrf_is_raw = False
+            else:
+                raise DtekConnectionError("Injected aiohttp.ClientSession is closed.")
+
+        if self._session is None and self._session_factory is not None:
+            self._session = self._session_factory()
+            self._csrf_token = None
+            self._csrf_is_raw = False
+
+        if self._session is None:
+            raise DtekConnectionError(
+                "Session not open. Use 'async with DtekClient()' or call connect()."
+            )
+
+        return self._session
 
     async def connect(self) -> None:
-        """Open a curl_cffi session (no-op if a session was injected)."""
+        """Open an internal aiohttp.ClientSession when no session was injected."""
         if self._session is None:
-            headers = {
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Accept-Language": "uk,en-US;q=0.9,en;q=0.8",
-                "Origin": self._base_url,
-                "Referer": f"{self._base_url}/ua/shutdowns",
-                "X-Requested-With": "XMLHttpRequest",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            }
-            self._session = AsyncSession(
-                timeout=self._timeout,
-                headers=headers,
-                impersonate="chrome120",
-            )
-            # Perform a warm-up GET to acquire WAF session cookies before
-            # making POST requests.  Incapsula returns HTTP 400 without this.
-            try:
-                _LOGGER.debug("Fetching initial WAF cookies from %s", self._base_url)
-                await self._session.get(f"{self._base_url}/ua/shutdowns")
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.debug("Warm-up GET failed (non-fatal): %s", exc)
+            if self._session_factory is not None:
+                self._session = self._session_factory()
+            else:
+                self._session = aiohttp.ClientSession(
+                    cookie_jar=aiohttp.CookieJar(),
+                    timeout=aiohttp.ClientTimeout(total=self._timeout),
+                )
+                self._owns_session = True
 
     async def close(self) -> None:
-        """Close the session (only if this client created it)."""
+        """Close the session if this client created and owns it."""
         if self._owns_session and self._session is not None:
             await self._session.close()
             self._session = None
@@ -211,161 +233,255 @@ class DtekClient:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.close()
 
-    # ── ajaxUrl discovery ─────────────────────────────────────────────────────
-
     async def _fetch_page_html(self, path: str) -> str | None:
-        """Fetch a schedule page and return its HTML, or None on 404 / WAF block."""
+        """Fetch a schedule page and return its HTML, or None on 404 or WAF challenge."""
+        session = self._get_active_session()
         url = f"{self._base_url}{path}"
         try:
-            resp = await self._session.get(url)  # type: ignore[union-attr]
-            if resp.status_code == HTTP_NOT_FOUND:
-                _LOGGER.debug("Schedule path %s → 404, trying next.", path)
-                return None
-            if resp.status_code >= HTTP_SERVER_ERROR:
-                raise DtekServerError(resp.status_code)
-            html: str = resp.text
-        except RequestsError as exc:
+            async with session.get(
+                url,
+                headers={"User-Agent": self._user_agent},
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as resp:
+                status = resp.status
+                text = await resp.text()
+        except TimeoutError as exc:
+            raise DtekTimeoutError(self._timeout) from exc
+        except (aiohttp.ClientSSLError, aiohttp.ClientConnectorSSLError) as exc:
+            raise DtekSSLError(f"SSL error connecting to {url}: {exc}") from exc
+        except aiohttp.ClientError as exc:
             raise DtekConnectionError(f"Cannot reach {url}: {exc}") from exc
 
-        # Detect Incapsula/Imperva WAF JavaScript challenge (~800 bytes).
-        if any(marker in html for marker in _INCAPSULA_MARKERS):
-            _LOGGER.warning(
-                "Incapsula/Imperva WAF challenge detected on %s "
-                "(page is %d chars — the real site is typically 100 KB+). "
-                "Automatic ajaxUrl discovery is blocked. "
-                "Fix: open the schedule page in a real browser, locate "
-                '<meta name="ajaxUrl"> and pass the URL as ajax_url= to DtekClient().',
-                url,
-                len(html),
-            )
-            return None  # Treat as not found — fall through to the next path.
+        if status == HTTP_NOT_FOUND:
+            return None
+        if status >= HTTP_SERVER_ERROR:
+            raise DtekServerError(status)
 
-        return html
+        if any(marker in text for marker in _INCAPSULA_MARKERS):
+            _LOGGER.warning("WAF challenge detected on %s; skipping HTML discovery.", url)
+            return None
+
+        return text
 
     async def _get_ajax_url(self) -> str:
-        """Return the ajaxUrl, discovering it from the schedule page if needed.
-
-        Discovery strategy (in priority order):
-
-        1. Already cached from a previous call.
-        2. Try the primary schedule_path from DTEK_SITES.
-        3. Try fallback paths from SCHEDULE_PAGE_FALLBACK_PATHS.
-        4. If nothing is found — use the hardcoded fallback: base_url + /ua/ajax.
-
-        Note: ajaxUrl in the meta tag may be a relative path ("/ua/ajax");
-        ``_resolve_ajax_url()`` converts it to an absolute URL.
-        """
+        """Return the AJAX endpoint URL, discovering it from HTML if requested."""
         if self._ajax_url:
             return self._ajax_url
 
-        if self._session is None:
-            raise DtekConnectionError(
-                "Session not open. Use 'async with DtekClient()' or call connect()."
-            )
+        self._get_active_session()
 
-        # Build the list of paths to try (primary first, then fallbacks without repeats).
-        paths_to_try = [self._schedule_path] + [
-            p for p in SCHEDULE_PAGE_FALLBACK_PATHS if p != self._schedule_path
-        ]
+        if self._discover_ajax_url:
+            paths_to_try = [self._schedule_path] + [
+                p for p in SCHEDULE_PAGE_FALLBACK_PATHS if p != self._schedule_path
+            ]
 
-        for path in paths_to_try:
-            _LOGGER.debug("Trying schedule path: %s%s", self._base_url, path)
-            html = await self._fetch_page_html(path)
-            if html is None:
-                continue
+            for path in paths_to_try:
+                html = await self._fetch_page_html(path)
+                if html is None:
+                    continue
 
-            # Try all known regex patterns on the page HTML.
-            for pattern in _AJAX_PATTERNS:
-                match = pattern.search(html)
-                if match:
-                    raw_url = match.group(1)
-                    ajax_url = _resolve_ajax_url(raw_url, self._base_url)
-                    _LOGGER.info(
-                        "Discovered ajaxUrl: %s (raw=%r, page=%s%s)",
-                        ajax_url,
-                        raw_url,
-                        self._base_url,
-                        path,
-                    )
-                    self._ajax_url = ajax_url
-                    self._schedule_path = path  # Cache the working path.
-                    return ajax_url
+                for pattern in _AJAX_PATTERNS:
+                    match = pattern.search(html)
+                    if match:
+                        raw_url = match.group(1)
+                        ajax_url = _resolve_ajax_url(raw_url, self._base_url)
+                        self._ajax_url = ajax_url
+                        self._schedule_path = path
+                        return ajax_url
 
-            _LOGGER.debug("No ajaxUrl pattern matched on %s%s.", self._base_url, path)
-
-        # All discovery paths failed — use the hardcoded fallback.
         fallback = f"{self._base_url}{FALLBACK_AJAX_PATH}"
-        _LOGGER.warning(
-            "Could not discover ajaxUrl from %s (tried %d paths). "
-            "Falling back to: %s. "
-            "If this fails, open the schedule page in a browser, locate "
-            'meta[name="ajaxUrl"] and pass it as ajax_url= to DtekClient().',
-            self._base_url,
-            len(paths_to_try),
-            fallback,
-        )
         self._ajax_url = fallback
         return fallback
 
-    # ── HTTP helpers ──────────────────────────────────────────────────────────
+    def _extract_token_from_cookies(self, cookies: Any) -> bool:
+        """Inspect a cookie mapping for a Yii2 CSRF cookie and store the raw token."""
+        if not cookies:
+            return False
+        items = cookies.items() if isinstance(cookies, Mapping) else []
+        for name, morsel in items:
+            cookie_name = str(name)
+            if cookie_name.startswith(CSRF_COOKIE_PREFIX) or cookie_name.startswith("_csrf"):
+                raw_val = getattr(morsel, "value", morsel)
+                if isinstance(raw_val, str):
+                    extracted = extract_csrf_token(raw_val)
+                    if extracted:
+                        self._csrf_token = extracted
+                        self._csrf_is_raw = True
+                        return True
+        return False
+
+    def _extract_token_from_jar(self, session: aiohttp.ClientSession) -> bool:
+        """Inspect the session cookie jar for an existing Yii2 CSRF cookie."""
+        cookie_jar = getattr(session, "cookie_jar", None)
+        if cookie_jar is None:
+            return False
+        try:
+            for cookie in cookie_jar:
+                name = getattr(cookie, "key", "")
+                value = getattr(cookie, "value", "")
+                if (
+                    isinstance(name, str)
+                    and (name.startswith(CSRF_COOKIE_PREFIX) or name.startswith("_csrf"))
+                    and isinstance(value, str)
+                ):
+                    extracted = extract_csrf_token(value)
+                    if extracted:
+                        self._csrf_token = extracted
+                        self._csrf_is_raw = True
+                        return True
+        except TypeError:
+            return False
+        return False
+
+    def _build_headers(self, token: str | None, *, is_raw_token: bool) -> dict[str, str]:
+        """Build HTTP headers for an AJAX POST request."""
+        headers = {
+            "User-Agent": self._user_agent,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "uk,en-US;q=0.9,en;q=0.8",
+            "Origin": self._base_url,
+            "Referer": f"{self._base_url}{self._schedule_path}",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        }
+        if token is not None:
+            headers["X-CSRF-Token"] = mask_csrf_token(token) if is_raw_token else token
+        return headers
+
+    async def _send_raw_post(
+        self,
+        ajax_url: str,
+        form: Mapping[str, Any],
+        token: str | None,
+        *,
+        is_raw_token: bool,
+    ) -> tuple[int, str, Mapping[str, Any]]:
+        """Execute a single POST request and return (status, body_text, headers)."""
+        session = self._get_active_session()
+        headers = self._build_headers(token, is_raw_token=is_raw_token)
+        try:
+            async with session.post(
+                ajax_url,
+                data=dict(form),
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as resp:
+                self._extract_token_from_cookies(getattr(resp, "cookies", None))
+                status = int(resp.status)
+                text = await resp.text()
+                resp_headers: Mapping[str, Any] = getattr(resp, "headers", {}) or {}
+                return status, text, resp_headers
+        except TimeoutError as exc:
+            raise DtekTimeoutError(self._timeout) from exc
+        except (aiohttp.ClientSSLError, aiohttp.ClientConnectorSSLError) as exc:
+            raise DtekSSLError(f"SSL error posting to {ajax_url}: {exc}") from exc
+        except aiohttp.ClientError as exc:
+            raise DtekConnectionError(f"Error requesting {ajax_url}: {exc}") from exc
+
+    async def _ensure_csrf_token(
+        self,
+        ajax_url: str,
+        *,
+        stale: str | None = None,
+    ) -> tuple[str | None, bool]:
+        """Return (csrf_token, is_raw), bootstrapping from /ua/ajax if needed."""
+        async with self._csrf_lock:
+            session = self._get_active_session()
+            if stale is not None and self._csrf_token == stale:
+                self._csrf_token = None
+                self._csrf_is_raw = False
+                cookie_jar = getattr(session, "cookie_jar", None)
+                if cookie_jar is not None and hasattr(cookie_jar, "clear"):
+                    try:
+                        cookie_jar.clear(lambda c: str(getattr(c, "key", "")).startswith("_csrf"))
+                    except TypeError:
+                        pass
+
+            if self._csrf_token is None:
+                self._extract_token_from_jar(session)
+
+            if self._csrf_token is None:
+                # A POST without X-CSRF-Token returns HTTP 400 and sets _csrf-dtek-<site>.
+                await self._send_raw_post(
+                    ajax_url,
+                    {"method": METHOD_GET_HOME_NUM},
+                    None,
+                    is_raw_token=False,
+                )
+                if self._csrf_token is None:
+                    self._extract_token_from_jar(session)
+
+            return self._csrf_token, self._csrf_is_raw
 
     async def _post(self, data: dict[str, Any]) -> Any:
-        """Send a form-encoded POST to the AJAX endpoint with retry logic."""
-        if self._session is None:
-            raise DtekConnectionError(
-                "Session not open. Use 'async with DtekClient()' or call connect()."
-            )
-
+        """Send a form-encoded POST to the AJAX endpoint with CSRF and 5xx retry logic."""
+        self._get_active_session()
         ajax_url = await self._get_ajax_url()
         last_error: Exception | None = None
 
-        # Manually encode the payload to ensure correct PHP-style form format.
-        encoded_payload = urllib.parse.urlencode(data)
-
-        # Force the headers the PHP server expects (impersonate may override them).
-        request_headers = {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-        }
-
         for attempt in range(1, self._retry_attempts + 1):
             try:
-                _LOGGER.debug(
-                    "POST %s method=%s (attempt %d/%d)",
+                token, is_raw = await self._ensure_csrf_token(ajax_url)
+                status, text, resp_headers = await self._send_raw_post(
                     ajax_url,
-                    data.get("method"),
-                    attempt,
-                    self._retry_attempts,
+                    data,
+                    token,
+                    is_raw_token=is_raw,
                 )
-                resp = await self._session.post(
-                    ajax_url,
-                    data=encoded_payload,
-                    headers=request_headers,
-                )
-                return self._handle_response(resp, ajax_url)
+
+                if status == HTTP_BAD_REQUEST:
+                    # Refresh stale or rejected CSRF token once and retry immediately.
+                    if self._csrf_token == token:
+                        token, is_raw = await self._ensure_csrf_token(
+                            ajax_url,
+                            stale=token or "",
+                        )
+                    else:
+                        token, is_raw = self._csrf_token, self._csrf_is_raw
+
+                    if token is not None:
+                        status, text, resp_headers = await self._send_raw_post(
+                            ajax_url,
+                            data,
+                            token,
+                            is_raw_token=is_raw,
+                        )
+
+                return self._handle_response(status, text, resp_headers, ajax_url)
 
             except DtekServerError as exc:
                 last_error = exc
                 if attempt < self._retry_attempts:
                     await asyncio.sleep(self._retry_delay * attempt)
 
-            except (DtekUnauthorizedError, DtekNotFoundError, DtekRateLimitError):
+            except (
+                DtekUnauthorizedError,
+                DtekNotFoundError,
+                DtekRateLimitError,
+                DtekBlockedError,
+            ):
                 raise
 
-        assert last_error is not None  # noqa: S101
+        assert last_error is not None
         raise last_error
 
-    def _handle_response(self, response: Any, url: str) -> Any:
-        """Translate HTTP errors into typed exceptions, then decode JSON."""
-        status: int = response.status_code
+    def _handle_response(
+        self,
+        status: int,
+        text: str,
+        headers: Mapping[str, Any],
+        url: str,
+    ) -> Any:
+        """Translate HTTP status codes and WAF markers into exceptions, then decode JSON."""
+        if _CHALLENGE_MARKER in text:
+            raise DtekBlockedError(f"DTEK returned an anti-bot challenge for {url}")
         if status == HTTP_UNAUTHORIZED:
             raise DtekUnauthorizedError()
         if status == HTTP_NOT_FOUND:
             raise DtekNotFoundError(url)
         if status == HTTP_TOO_MANY_REQUESTS:
             retry_after: float | None = None
-            raw_hdr = response.headers.get("Retry-After")
+            raw_hdr = headers.get("Retry-After")
             if raw_hdr:
                 try:
                     retry_after = float(raw_hdr)
@@ -374,11 +490,11 @@ class DtekClient:
             raise DtekRateLimitError(retry_after)
         if status >= HTTP_SERVER_ERROR:
             raise DtekServerError(status)
-        if status >= 400:
+        if status >= HTTP_BAD_REQUEST:
             raise DtekAPIError(f"HTTP {status}", status_code=status)
 
         try:
-            payload = response.json()
+            payload = json.loads(text)
         except Exception as exc:
             raise DtekDataError(f"Failed to decode JSON from {url}: {exc}") from exc
 
@@ -387,23 +503,13 @@ class DtekClient:
 
         return payload
 
-    # ── Form-data builders ────────────────────────────────────────────────────
-
     @staticmethod
     def _build_form(
         method: str,
         fields: list[tuple[str, str]],
         update_fact: str | None = None,
     ) -> dict[str, Any]:
-        """Build the form dict expected by the DTEK AJAX handler.
-
-        The site uses jQuery's serializeArray() format::
-
-            method=getHomeNum
-            data[0][name]=city      data[0][value]=м. Українка
-            data[1][name]=street    data[1][value]=вул. Юності
-            data[2][name]=updateFact   data[2][value]=21.03.2026 16:25
-        """
+        """Build the jQuery serializeArray form dict expected by the DTEK AJAX handler."""
         form: dict[str, Any] = {"method": method}
         for idx, (name, value) in enumerate(fields):
             form[f"data[{idx}][name]"] = name
@@ -414,41 +520,72 @@ class DtekClient:
             form[f"data[{idx}][value]"] = update_fact
         return form
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    async def _fetch_streets_raw(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Fetch and cache the raw getStreets payload on this client instance."""
+        if refresh or self._streets_cache is None:
+            raw = await self._post({"method": METHOD_GET_STREETS})
+            if not isinstance(raw, dict):
+                raise DtekDataError("getStreets: expected dict response.", raw=raw)
+            self._streets_cache = raw
+        return self._streets_cache
+
+    async def get_all_streets(self, *, refresh: bool = False) -> dict[str, list[str]]:
+        """Return the complete settlement-to-streets dictionary for this DTEK site.
+
+        On ``kem`` (Kyiv city), the server returns a flat list of streets; this
+        method normalizes it under the ``"м. Київ"`` settlement key. The regional
+        street directory (~470 KB) is cached on the client instance unless
+        ``refresh=True`` is passed.
+        """
+        raw = await self._fetch_streets_raw(refresh=refresh)
+
+        streets_raw = raw.get("streets", raw.get("data", {}))
+        if isinstance(streets_raw, list):
+            return {"м. Київ": [str(s) for s in streets_raw if s]}
+
+        if isinstance(streets_raw, dict):
+            result: dict[str, list[str]] = {}
+            for settlement, names in streets_raw.items():
+                if isinstance(settlement, str) and isinstance(names, list):
+                    result[settlement] = [str(s) for s in names if s]
+            return result
+
+        return {}
 
     async def get_streets(
         self,
-        city: str,
+        city: str | None = None,
         *,
-        update_fact: str | None = None,
+        refresh: bool = False,
     ) -> list[StreetSuggestion]:
-        """Return all streets available in ``city`` on this DTEK site.
-
-        Per discon-schedule.js (getStreetsInvisibly): getStreets sends only
-        ``method=getStreets`` with NO data array. The server returns the full
-        city→streets map for the whole region; we filter by city client-side.
+        """Return streets available in ``city`` on this DTEK site.
 
         Args:
-            city: city name as it appears on the site (e.g. "м. Українка").
-            update_fact: timestamp from a previous response (improves server caching).
-
-        Returns:
-            A list of :class:`StreetSuggestion` objects, one per street.
+            city: Settlement name as it appears on the site (e.g. ``"м. Українка"``).
+                  Optional on ``kem`` (Kyiv city) where the site returns a flat list.
+            refresh: Bypass the instance street cache and fetch fresh data.
         """
-        form: dict[str, Any] = {"method": METHOD_GET_STREETS}
-        raw = await self._post(form)
-
-        if not isinstance(raw, dict):
-            raise DtekDataError("getStreets: expected dict response.", raw=raw)
-
-        # Response key is "streets" (answer.streets in JS), not "data".
-        # streets_raw is {"м. Українка": ["вул. Юності", ...], "м. Обухів": [...], ...}
+        raw = await self._fetch_streets_raw(refresh=refresh)
         streets_raw = raw.get("streets", raw.get("data", {}))
 
+        if isinstance(streets_raw, list):
+            return [StreetSuggestion(name=str(s)) for s in streets_raw if s]
+
         if isinstance(streets_raw, dict):
-            city_streets: list[str] | None = streets_raw.get(city)
+            if city is None:
+                unique_streets = sorted(
+                    {
+                        str(s)
+                        for names in streets_raw.values()
+                        if isinstance(names, list)
+                        for s in names
+                        if s
+                    }
+                )
+                return [StreetSuggestion(name=s) for s in unique_streets]
+
+            city_streets: Any = streets_raw.get(city)
             if city_streets is None:
-                # Case-insensitive fallback.
                 city_lower = city.lower()
                 for k, v in streets_raw.items():
                     if isinstance(k, str) and k.lower() == city_lower:
@@ -456,17 +593,14 @@ class DtekClient:
                         break
             if city_streets is None:
                 _LOGGER.warning(
-                    "getStreets: city %r not found in response. Available cities: %s",
+                    "getStreets: city %r not found in response. Available cities: %d",
                     city,
-                    sorted(str(k) for k in streets_raw.keys()),
+                    len(streets_raw),
                 )
                 return []
             if isinstance(city_streets, list):
                 return [StreetSuggestion(name=str(s)) for s in city_streets if s]
             return []
-
-        if isinstance(streets_raw, list):
-            return [StreetSuggestion(name=str(s)) for s in streets_raw]
 
         _LOGGER.warning("getStreets: unexpected data structure: %r", type(streets_raw))
         return []
@@ -478,65 +612,51 @@ class DtekClient:
         *,
         update_fact: str | None = None,
     ) -> HomeNumResponse:
-        """Return all house numbers + group assignments for a city/street.
-
-        This is the core method — it returns the full ``HomeNumResponse`` which
-        contains the house→group mapping **plus** the preset and fact schedules.
+        """Return all house numbers, group assignments, and schedules for a street.
 
         Args:
-            city: city name (e.g. "м. Українка").
-            street: street name (e.g. "вул. Юності").
-            update_fact: timestamp from a previous response (enables delta updates).
-
-        Returns:
-            :class:`HomeNumResponse` with all house entries and schedule data.
+            city: Settlement name (e.g. ``"м. Українка"``).
+            street: Street name (e.g. ``"вул. Юності"``).
+            update_fact: Optional version timestamp from a previous response.
+                         Defaults to ``FORCE_UPDATE_FACT`` so the server includes
+                         both ``fact`` and ``preset`` schedules in a single response.
         """
+        effective_update_fact = update_fact if update_fact is not None else FORCE_UPDATE_FACT
         form = self._build_form(
             METHOD_GET_HOME_NUM,
             [("city", city), ("street", street)],
-            update_fact=update_fact,
+            update_fact=effective_update_fact,
         )
         raw = await self._post(form)
 
         if not isinstance(raw, dict):
             raise DtekDataError("getHomeNum: expected dict response.", raw=raw)
 
-        # If the server did not include a schedule, fetch it from the global cache.
-        if "preset" not in raw and "fact" not in raw:
+        if "preset" in raw or "fact" in raw:
+            # Keep the cached global schedule synchronized whenever fresh schedule
+            # blocks arrive so subsequent delta responses never fall back to stale data.
+            updated_cache = dict(self._global_schedule) if self._global_schedule else {}
+            if "preset" in raw:
+                updated_cache["preset"] = raw["preset"]
+            if "fact" in raw:
+                updated_cache["fact"] = raw["fact"]
+            self._global_schedule = updated_cache
+        else:
             if self._global_schedule is None:
                 try:
-                    _LOGGER.debug("Fetching global schedule via checkDisconUpdate...")
                     global_raw = await self._post(
                         {
-                            "method": "checkDisconUpdate",
-                            "update": "01.01.2000 00:00",
+                            "method": METHOD_CHECK_UPDATE,
+                            "update": FORCE_UPDATE_FACT,
                         }
                     )
                     self._global_schedule = global_raw if isinstance(global_raw, dict) else {}
-                    # DEBUG: log structure to detect DTEK API format changes.
-                    if isinstance(global_raw, dict):
-                        _LOGGER.debug(
-                            "checkDisconUpdate keys: %s | "
-                            "preset.data type=%s | fact.data type=%s | "
-                            "getHomeNum data type=%s",
-                            list(global_raw.keys()),
-                            (
-                                type(global_raw.get("preset", {}).get("data")).__name__
-                                if isinstance(global_raw.get("preset"), dict)
-                                else "n/a"
-                            ),
-                            (
-                                type(global_raw.get("fact", {}).get("data")).__name__
-                                if isinstance(global_raw.get("fact"), dict)
-                                else "n/a"
-                            ),
-                            type(raw.get("data")).__name__,
-                        )
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch global schedule: %s", exc)
                     self._global_schedule = {}
 
             if self._global_schedule:
+                raw = dict(raw)
                 if "preset" in self._global_schedule:
                     raw["preset"] = self._global_schedule["preset"]
                 if "fact" in self._global_schedule:
@@ -554,40 +674,35 @@ class DtekClient:
         house_number: str,
         *,
         update_fact: str | None = None,
+        response: HomeNumResponse | None = None,
     ) -> AddressResult:
         """Find the disconnection group for a specific address.
 
         Args:
-            city: city name (e.g. "м. Українка").
-            street: street name (e.g. "вул. Юності").
-            house_number: building number (e.g. "10", "10А", "10/2").
-            update_fact: optional timestamp from a previous response.
-
-        Returns:
-            :class:`AddressResult` with the group_id and display name.
-
-        Raises:
-            :exc:`DtekNotFoundError`: if the house number is not in the response.
+            city: Settlement name (e.g. ``"м. Українка"``).
+            street: Street name (e.g. ``"вул. Юності"``).
+            house_number: Building number (e.g. ``"10"``, ``"10А"``, ``"10/2"``).
+            update_fact: Optional timestamp from a previous response.
+            response: Pre-fetched ``HomeNumResponse`` to avoid a duplicate request.
         """
-        response = await self.get_home_num(city, street, update_fact=update_fact)
-
-        entry = response.houses.get(house_number)
+        resolved = response or await self.get_home_num(city, street, update_fact=update_fact)
+        entry = resolved.find_house(house_number)
         if entry is None:
             raise DtekNotFoundError(
                 f"House {house_number!r} not found on {street!r}, {city!r}. "
-                f"Available numbers: {', '.join(sorted(response.houses.keys()))}"
+                f"Available numbers: {', '.join(sorted(resolved.houses.keys()))}"
             )
 
         group_id = entry.primary_group or "unknown"
         group_name = ""
-        if response.preset and group_id in response.preset.sch_names:
-            group_name = response.preset.sch_names[group_id]
+        if resolved.preset and group_id in resolved.preset.sch_names:
+            group_name = resolved.preset.sch_names[group_id]
 
         return AddressResult(
             site_key=self._site_key,
             city=city,
             street=street,
-            house_number=house_number,
+            house_number=entry.house_number,
             group_id=group_id,
             group_display_name=group_name,
         )
@@ -599,26 +714,15 @@ class DtekClient:
         house_number: str,
         *,
         update_fact: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Shortcut: return today's fact-schedule slot map for one house.
-
-        Each slot represents a 30-minute interval (e.g. "00:00–00:30").
-        SlotStatus.FIRST / SECOND indicate outage only in the first or second
-        half of the slot (~15 min each).
-
-        Returns:
-            dict mapping time-zone keys to :class:`SlotStatus`, or ``None``
-            if today's schedule is not yet published.
-        """
-        response = await self.get_home_num(city, street, update_fact=update_fact)
-        entry = response.houses.get(house_number)
-        if entry is None or not entry.primary_group:
+        response: HomeNumResponse | None = None,
+    ) -> dict[str, SlotStatus] | None:
+        """Return today's confirmed schedule slot map for one house, or None."""
+        resolved = response or await self.get_home_num(city, street, update_fact=update_fact)
+        entry = resolved.find_house(house_number)
+        if entry is None or not entry.primary_group or resolved.fact is None:
             return None
 
-        if response.fact is None:
-            return None
-
-        return response.fact.get_group_today(entry.primary_group)
+        return resolved.fact.get_group_today(entry.primary_group)
 
     async def get_tomorrow_schedule(
         self,
@@ -627,27 +731,16 @@ class DtekClient:
         house_number: str,
         *,
         update_fact: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Shortcut: return tomorrow's fact-schedule slot map for one house.
-
-        The DTEK site publishes tomorrow's schedule during the day (usually
-        after 16:00–18:00 Kyiv time). Until then this method returns ``None``.
-
-        Each slot represents a 30-minute interval (e.g. "00:00–00:30").
-
-        Returns:
-            dict mapping time-zone keys to :class:`SlotStatus`, or ``None``
-            if tomorrow's schedule has not yet been published.
-        """
-        response = await self.get_home_num(city, street, update_fact=update_fact)
-        entry = response.houses.get(house_number)
-        if entry is None or not entry.primary_group:
-            return None
-        if response.fact is None:
+        response: HomeNumResponse | None = None,
+    ) -> dict[str, SlotStatus] | None:
+        """Return tomorrow's confirmed schedule slot map for one house, or None."""
+        resolved = response or await self.get_home_num(city, street, update_fact=update_fact)
+        entry = resolved.find_house(house_number)
+        if entry is None or not entry.primary_group or resolved.fact is None:
             return None
 
-        tomorrow_ts = response.fact.today_ts + 86400
-        return response.fact.get_group_day(tomorrow_ts, entry.primary_group)
+        tomorrow_date = resolved.fact.today_date + datetime.timedelta(days=1)
+        return resolved.fact.get_group_for_date(tomorrow_date, entry.primary_group)
 
     async def get_schedule_for_date(
         self,
@@ -657,69 +750,35 @@ class DtekClient:
         date: datetime.date,
         *,
         update_fact: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Return the fact-schedule slot map for a specific calendar date.
-
-        The server usually keeps today and tomorrow in the ``fact`` payload.
-        Dates further in the future (or past) will return ``None``.
-
-        Args:
-            city: city name (e.g. "м. Українка").
-            street: street name (e.g. "вул. Юності").
-            house_number: building number (e.g. "10").
-            date: the calendar date to query (e.g. ``datetime.date.today()``).
-            update_fact: optional timestamp from a previous response.
-
-        Returns:
-            dict mapping time-zone keys to :class:`SlotStatus`, or ``None``
-            if the schedule for the given date is not available.
-        """
-        response = await self.get_home_num(city, street, update_fact=update_fact)
-        entry = response.houses.get(house_number)
-        if entry is None or not entry.primary_group:
-            return None
-        if response.fact is None:
+        response: HomeNumResponse | None = None,
+    ) -> dict[str, SlotStatus] | None:
+        """Return the confirmed schedule slot map for a specific calendar date."""
+        resolved = response or await self.get_home_num(city, street, update_fact=update_fact)
+        entry = resolved.find_house(house_number)
+        if entry is None or not entry.primary_group or resolved.fact is None:
             return None
 
-        # Convert the Python date to a Unix timestamp by calculating the offset
-        # in days from fact.today_ts (which is midnight Kyiv time from the server).
-        today_ts = response.fact.today_ts
-        today_date = datetime.datetime.fromtimestamp(today_ts, tz=ZoneInfo("Europe/Kyiv")).date()
-        delta_days = (date - today_date).days
-        target_ts = today_ts + delta_days * 86400
-
-        return response.fact.get_group_day(target_ts, entry.primary_group)
+        return resolved.fact.get_group_for_date(date, entry.primary_group)
 
     @staticmethod
     def get_available_fact_dates(response: Any) -> list[datetime.date]:
-        """Return all calendar dates available in a ``HomeNumResponse.fact``.
-
-        Use this to discover which dates the server has published schedules for
-        (typically today and tomorrow, sometimes only today).
-
-        Args:
-            response: a :class:`HomeNumResponse` returned by :meth:`get_home_num`.
-
-        Returns:
-            Sorted list of :class:`datetime.date` objects.
-        """
+        """Return all calendar dates available in a ``HomeNumResponse.fact``."""
         if response.fact is None:
             return []
+        tz = ZoneInfo(DEFAULT_TIMEZONE)
         dates: list[datetime.date] = []
         for ts_str in response.fact.days:
             try:
                 ts = int(ts_str)
-                d = datetime.datetime.fromtimestamp(ts, tz=ZoneInfo("Europe/Kyiv")).date()
+                d = datetime.datetime.fromtimestamp(ts, tz=tz).date()
                 dates.append(d)
             except (ValueError, OSError):
                 continue
         return sorted(dates)
 
-    # ── Properties ────────────────────────────────────────────────────────────
-
     @property
     def site_key(self) -> str:
-        """The site_key this client is configured for (e.g. "kem")."""
+        """The regional site_key this client is configured for."""
         return self._site_key
 
     @property
@@ -729,5 +788,5 @@ class DtekClient:
 
     @property
     def ajax_url(self) -> str | None:
-        """Cached ajaxUrl (None until the first request is made)."""
+        """Configured or discovered ajaxUrl (None until resolved if not pre-set)."""
         return self._ajax_url

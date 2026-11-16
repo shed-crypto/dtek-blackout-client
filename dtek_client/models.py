@@ -1,33 +1,36 @@
 """Pydantic models for dtek-blackout-client.
 
 Terminology (as returned by the DTEK site):
-    preset   – static weekly outage plan
-    fact     – confirmed daily schedule (published by NPC Ukrenerho)
-    slot     – a 30-minute time interval (e.g. "00:00–00:30")
-    group_id – disconnection group identifier (e.g. "GPV3.1")
+    preset   - static weekly outage plan
+    fact     - confirmed daily schedule (published by NPC Ukrenerho)
+    slot     - a 30-minute or 60-minute time interval key
+    group_id - disconnection group identifier (e.g. "GPV3.1")
 
-Slot status values:
-    yes     → electricity available (no outage)
-    no      → definite outage for the whole slot
-    maybe   → possible outage for the whole slot
-    first   → outage in the first half of the slot (~15 min)
-    second  → outage in the second half of the slot (~15 min)
-    mfirst  → possible outage in the first half
-    msecond → possible outage in the second half
-
-All models are frozen=True — safe to pass between coroutines.
+All models are frozen=True so instances can be safely shared across tasks.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, model_validator
 
+from .const import DEFAULT_TIMEZONE
+
 _LOGGER = logging.getLogger(__name__)
+
+# Latin letters frequently typed in place of visually identical Cyrillic letters
+# in Ukrainian building numbers (e.g. "8a" vs "8а").
+_HOUSE_LOOKALIKES = str.maketrans("aceiopxkmhtby", "асеіорхкмнтву")
+
+
+def normalize_house_key(number: str) -> str:
+    """Normalize a house number for tolerant comparison across scripts and spacing."""
+    return "".join(number.split()).casefold().translate(_HOUSE_LOOKALIKES)
 
 
 class _FrozenModel(BaseModel):
@@ -38,20 +41,17 @@ class _FrozenModel(BaseModel):
     }
 
 
-# ── Slot status enum ──────────────────────────────────────────────────────────
-
-
 class SlotStatus(StrEnum):
-    """Possible status values for a time-slot cell in the DTEK schedule table."""
+    """Status values for a time-slot cell in the DTEK schedule table."""
 
-    YES = "yes"  # Electricity available — no outage
-    NO = "no"  # Definite outage for the whole slot
-    MAYBE = "maybe"  # Possible outage for the whole slot
-    FIRST = "first"  # Outage in the first half of the slot (~15 min)
-    SECOND = "second"  # Outage in the second half of the slot (~15 min)
-    MFIRST = "mfirst"  # Possible outage in the first half
-    MSECOND = "msecond"  # Possible outage in the second half
-    UNKNOWN = "unknown"  # Fallback for unrecognised values
+    YES = "yes"
+    NO = "no"
+    MAYBE = "maybe"
+    FIRST = "first"
+    SECOND = "second"
+    MFIRST = "mfirst"
+    MSECOND = "msecond"
+    UNKNOWN = "unknown"
 
     @classmethod
     def _missing_(cls, value: object) -> SlotStatus:
@@ -65,7 +65,7 @@ class SlotStatus(StrEnum):
 
     @property
     def may_have_outage(self) -> bool:
-        """True if this slot has a definite OR possible outage."""
+        """True if this slot has a definite or possible outage."""
         return self in (
             SlotStatus.NO,
             SlotStatus.FIRST,
@@ -76,16 +76,8 @@ class SlotStatus(StrEnum):
         )
 
 
-# ── Weekly planned schedule (preset.data) ─────────────────────────────────────
-
-
 class WeekDaySchedule(_FrozenModel):
-    """Schedule for one disconnection group on one day of the week.
-
-    ``slots`` maps a time-zone key (e.g. "1", "2", …, "48") to a SlotStatus.
-    The human-readable time labels (e.g. "00:00–00:30") live in
-    ``PresetSchedule.time_zone``.
-    """
+    """Schedule for one disconnection group on one day of the week."""
 
     slots: dict[str, SlotStatus] = Field(default_factory=dict)
 
@@ -95,7 +87,13 @@ class WeekDaySchedule(_FrozenModel):
         """Accept a raw {slot_key: str_value} dict from the AJAX response."""
         if not isinstance(data, dict):
             return data
-        return {"slots": {k: SlotStatus(v) for k, v in data.items() if isinstance(v, str)}}
+        if "slots" in data and isinstance(data["slots"], dict):
+            return {
+                "slots": {
+                    str(k): SlotStatus(v) for k, v in data["slots"].items() if isinstance(v, str)
+                }
+            }
+        return {"slots": {str(k): SlotStatus(v) for k, v in data.items() if isinstance(v, str)}}
 
     @property
     def outage_slot_count(self) -> int:
@@ -109,29 +107,18 @@ class WeekDaySchedule(_FrozenModel):
 
 
 class GroupWeekSchedule(_FrozenModel):
-    """Weekly planned schedule for one disconnection group.
-
-    ``days`` maps a DTEK day-index (1=Mon, …, 7=Sun) to a WeekDaySchedule.
-    """
+    """Weekly planned schedule for one disconnection group."""
 
     group_id: str
     days: dict[int, WeekDaySchedule] = Field(default_factory=dict)
 
     def get_day(self, dtek_weekday: int) -> WeekDaySchedule | None:
-        """Return the schedule for a given DTEK weekday (1–7)."""
+        """Return the schedule for a given DTEK weekday (1-7)."""
         return self.days.get(dtek_weekday)
 
 
 class PresetSchedule(_FrozenModel):
-    """Full static (planned) weekly schedule as returned in ``preset``.
-
-    Attributes:
-        groups    – dict of group_id → GroupWeekSchedule
-        time_zone – time-slot labels, e.g. {"1": "00:00–00:30", …}
-        sch_names – group display names, e.g. {"GPV3.1": "Черга 3.1"}
-        days      – day names, e.g. {1: "Понеділок", …}
-        is_active – False if the schedule is empty or inactive
-    """
+    """Full static (planned) weekly schedule as returned in ``preset``."""
 
     groups: dict[str, GroupWeekSchedule] = Field(default_factory=dict)
     time_zone: dict[str, str] = Field(default_factory=dict)
@@ -149,11 +136,9 @@ class PresetSchedule(_FrozenModel):
         raw_data = data.get("data", {})
 
         if isinstance(raw_data, list):
-            if len(raw_data) == 0:
-                raw_data = {}
-            else:
+            if len(raw_data) > 0:
                 _LOGGER.warning("preset.data is a non-empty list. Unexpected DTEK API format.")
-                raw_data = {}
+            raw_data = {}
 
         groups: dict[str, GroupWeekSchedule] = {}
 
@@ -172,16 +157,19 @@ class PresetSchedule(_FrozenModel):
                 groups[group_id] = GroupWeekSchedule(group_id=group_id, days=days_parsed)
 
         raw_tz = data.get("time_zone", {})
-        if isinstance(raw_tz, list) and len(raw_tz) == 0:
+        if isinstance(raw_tz, list):
             raw_tz = {}
         time_zone = (
-            {k: (v[0] if isinstance(v, list) else str(v)) for k, v in raw_tz.items()}
+            {
+                str(k): (str(v[0]) if isinstance(v, list) and v else str(v))
+                for k, v in raw_tz.items()
+            }
             if isinstance(raw_tz, dict)
             else {}
         )
 
         raw_days = data.get("days", {})
-        if isinstance(raw_days, list) and len(raw_days) == 0:
+        if isinstance(raw_days, list):
             raw_days = {}
         days_out = {
             int(k): str(v)
@@ -190,10 +178,9 @@ class PresetSchedule(_FrozenModel):
         }
 
         sch_names = data.get("sch_names", {})
-        if isinstance(sch_names, list) and len(sch_names) == 0:
+        if isinstance(sch_names, list):
             sch_names = {}
 
-        # is_active: False when time_zone or data is empty.
         is_active = bool(time_zone) and bool(raw_data)
 
         return {
@@ -214,17 +201,11 @@ class PresetSchedule(_FrozenModel):
         return sorted(self.groups.keys())
 
 
-# ── Actual (fact) schedule ────────────────────────────────────────────────────
-
-
 class FactDaySchedule(_FrozenModel):
-    """Actual confirmed schedule for one group on one specific calendar day.
-
-    ``slots`` maps a time-zone key to a SlotStatus (same keys as preset.time_zone).
-    """
+    """Confirmed schedule for one group on one specific calendar day."""
 
     group_id: str
-    day_ts: int  # Unix timestamp of the day (midnight Kyiv time)
+    day_ts: int
     slots: dict[str, SlotStatus] = Field(default_factory=dict)
 
     @property
@@ -239,21 +220,15 @@ class FactDaySchedule(_FrozenModel):
 
     @property
     def day_date(self) -> datetime:
-        """Return the day as a UTC datetime."""
+        """Return the day timestamp as a UTC datetime."""
         return datetime.fromtimestamp(self.day_ts, tz=UTC)
 
 
 class FactSchedule(_FrozenModel):
-    """Confirmed actual schedule for today (and possibly tomorrow) from ``fact``.
-
-    ``days`` maps unix-timestamp strings to per-group slot maps.
-    ``today_ts`` is the unix timestamp of today (from ``fact.today``).
-    ``update`` is the last-updated timestamp string from the site.
-    """
+    """Confirmed actual schedule for today and tomorrow from ``fact``."""
 
     today_ts: int
     update: str | None = None
-    # Structure: {ts_str: {group_id: {tz_key: SlotStatus}}}
     days: dict[str, dict[str, dict[str, SlotStatus]]] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -266,11 +241,9 @@ class FactSchedule(_FrozenModel):
         raw_data = data.get("data", {})
 
         if isinstance(raw_data, list):
-            if len(raw_data) == 0:
-                raw_data = {}
-            else:
+            if len(raw_data) > 0:
                 _LOGGER.warning("fact.data is a non-empty list. Unexpected DTEK API format.")
-                raw_data = {}
+            raw_data = {}
 
         days: dict[str, dict[str, dict[str, SlotStatus]]] = {}
 
@@ -282,8 +255,8 @@ class FactSchedule(_FrozenModel):
                 for group_id, slot_map in group_map.items():
                     if not isinstance(slot_map, dict):
                         continue
-                    day_entry[group_id] = {k: SlotStatus(v) for k, v in slot_map.items()}
-                days[ts_str] = day_entry
+                    day_entry[group_id] = {str(k): SlotStatus(v) for k, v in slot_map.items()}
+                days[str(ts_str)] = day_entry
 
         return {
             "today_ts": int(data.get("today", 0)),
@@ -291,33 +264,93 @@ class FactSchedule(_FrozenModel):
             "days": days,
         }
 
+    @property
+    def today_date(self) -> date:
+        """Return today's local calendar date in Europe/Kyiv timezone."""
+        return datetime.fromtimestamp(self.today_ts, tz=ZoneInfo(DEFAULT_TIMEZONE)).date()
+
     def get_group_today(self, group_id: str) -> dict[str, SlotStatus] | None:
         """Return today's slot map for a group, or None if unavailable."""
         ts_str = str(self.today_ts)
         day = self.days.get(ts_str)
-        if day is None:
+        if day is not None:
+            return day.get(group_id)
+        if self.today_ts <= 0:
             return None
-        return day.get(group_id)
+        return self.get_group_for_date(self.today_date, group_id)
 
     def get_group_day(self, ts: int, group_id: str) -> dict[str, SlotStatus] | None:
-        """Return the slot map for a specific day (by unix timestamp) and group."""
+        """Return the slot map for a specific day timestamp and group."""
         return self.days.get(str(ts), {}).get(group_id)
 
+    def get_group_for_date(
+        self,
+        target_date: date,
+        group_id: str,
+        *,
+        tz_name: str = DEFAULT_TIMEZONE,
+    ) -> dict[str, SlotStatus] | None:
+        """Return the slot map for a calendar date and group.
 
-# ── House entry (from getHomeNum response) ────────────────────────────────────
+        Matches day keys by converting each Unix timestamp to a local date in
+        ``tz_name`` so DST transitions (23-hour and 25-hour days) never shift
+        midnight lookups by an hour.
+        """
+        tz = ZoneInfo(tz_name)
+        for ts_str, group_map in self.days.items():
+            try:
+                ts = int(ts_str)
+                day_date = datetime.fromtimestamp(ts, tz=tz).date()
+            except (ValueError, OSError, OverflowError):
+                continue
+            if day_date == target_date:
+                return group_map.get(group_id)
+        return None
+
+
+def _build_house_entry(house_num: str, raw_entry: Any) -> HouseEntry | None:
+    """Build a HouseEntry from a single dict or a list of outage dicts."""
+    records: list[dict[str, Any]]
+    if isinstance(raw_entry, dict):
+        records = [raw_entry]
+    elif isinstance(raw_entry, list):
+        records = [r for r in raw_entry if isinstance(r, dict)]
+    else:
+        return None
+
+    if not records:
+        return None
+
+    group_ids: list[str] = []
+    for rec in records:
+        reasons = rec.get("sub_type_reason")
+        if isinstance(reasons, list):
+            for gid in reasons:
+                gid_str = str(gid)
+                if gid_str and gid_str not in group_ids:
+                    group_ids.append(gid_str)
+
+    # Prefer the record that carries an active outage reason or start_date.
+    primary_rec = next(
+        (r for r in records if r.get("sub_type") or r.get("start_date")),
+        records[0],
+    )
+    external = any(bool(r.get("cek")) for r in records)
+
+    return HouseEntry(
+        house_number=house_num,
+        group_ids=group_ids,
+        sub_type=str(primary_rec.get("sub_type") or ""),
+        start_date=str(primary_rec.get("start_date") or ""),
+        end_date=str(primary_rec.get("end_date") or ""),
+        type=str(primary_rec.get("type") or ""),
+        voluntarily=primary_rec.get("voluntarily"),
+        external_operator=external,
+    )
 
 
 class HouseEntry(_FrozenModel):
-    """One house from the ``getHomeNum`` AJAX response.
-
-    Attributes:
-        house_number  – key from the ``data`` dict (e.g. "1", "1A", "3/B")
-        group_ids     – list from ``sub_type_reason`` (e.g. ["GPV3.1"])
-        is_multi_group – True when len(group_ids) > 1
-        is_excluded    – True when group_ids is empty (address not in schedule)
-        sub_type       – non-empty when there is a current planned outage reason
-        outage_type    – "1" = planned works, "2" = other
-    """
+    """One house from the ``getHomeNum`` AJAX response."""
 
     house_number: str
     group_ids: list[str] = Field(default_factory=list)
@@ -326,6 +359,7 @@ class HouseEntry(_FrozenModel):
     end_date: str = ""
     outage_type: str = Field(default="", alias="type")
     voluntarily: bool | None = None
+    external_operator: bool = False
 
     @property
     def is_multi_group(self) -> bool:
@@ -334,7 +368,7 @@ class HouseEntry(_FrozenModel):
 
     @property
     def is_excluded(self) -> bool:
-        """True if this address is not in any outage group."""
+        """True if this address is not assigned to any outage group."""
         return len(self.group_ids) == 0
 
     @property
@@ -344,38 +378,25 @@ class HouseEntry(_FrozenModel):
 
     @property
     def has_current_outage(self) -> bool:
-        """True if the site reports a current (non-scheduled) outage for this address."""
+        """True if the site reports a current outage for this address."""
         return bool(self.sub_type) or bool(self.start_date)
 
     def __str__(self) -> str:
         if self.is_excluded:
-            return f"{self.house_number} → (not in schedule)"
+            return f"{self.house_number} -> (not in schedule)"
         if self.is_multi_group:
-            return f"{self.house_number} → groups: {', '.join(self.group_ids)}"
-        return f"{self.house_number} → group: {self.primary_group}"
-
-
-# ── Full getHomeNum response ───────────────────────────────────────────────────
+            return f"{self.house_number} -> groups: {', '.join(self.group_ids)}"
+        return f"{self.house_number} -> group: {self.primary_group}"
 
 
 class HomeNumResponse(_FrozenModel):
-    """Full parsed response from the ``getHomeNum`` AJAX call.
-
-    Attributes:
-        houses              – dict of house_number → HouseEntry
-        preset              – static weekly schedule (or None if not returned)
-        fact                – confirmed daily schedule (or None if not returned)
-        show_cur_schedule   – True if the site currently shows the schedule table
-        show_table_plan     – True if the static plan table should be shown
-        show_table_fact     – True if the fact table should be shown
-        show_table_schedule – True if the schedule table should be shown
-        update_timestamp    – display string like "26.03.2026 14:00"
-    """
+    """Full parsed response from the ``getHomeNum`` AJAX call."""
 
     houses: dict[str, HouseEntry] = Field(default_factory=dict)
     preset: PresetSchedule | None = None
     fact: FactSchedule | None = None
     show_cur_schedule: bool = Field(default=False, alias="showCurSchedule")
+    show_cur_outage_param: bool = Field(default=False, alias="showCurOutageParam")
     show_table_plan: bool = Field(default=False, alias="showTablePlan")
     show_table_fact: bool = Field(default=False, alias="showTableFact")
     show_table_schedule: bool = Field(default=False, alias="showTableSchedule")
@@ -384,7 +405,7 @@ class HomeNumResponse(_FrozenModel):
     @model_validator(mode="before")
     @classmethod
     def _parse_response(cls, data: Any) -> Any:
-        """Parse the raw AJAX dict into typed houses, preset and fact."""
+        """Parse the raw AJAX dict into typed houses, preset, and fact."""
         if not isinstance(data, dict):
             return data
 
@@ -392,17 +413,9 @@ class HomeNumResponse(_FrozenModel):
         houses: dict[str, HouseEntry] = {}
 
         if isinstance(raw_data, list):
-            # New API format (observed ~2025-05): data is a list of house objects.
-            _LOGGER.debug(
-                "getHomeNum: 'data' is a list (%d items) — using list parser. "
-                "First item keys: %s",
-                len(raw_data),
-                list(raw_data[0].keys()) if raw_data else [],
-            )
             for entry in raw_data:
                 if not isinstance(entry, dict):
                     continue
-                # Try known key names for the house number field.
                 house_num = (
                     entry.get("num")
                     or entry.get("house_num")
@@ -415,36 +428,22 @@ class HomeNumResponse(_FrozenModel):
                         "getHomeNum list item has no recognised house-number key: %s", entry
                     )
                     continue
-                house_num = str(house_num)
-                houses[house_num] = HouseEntry(
-                    house_number=house_num,
-                    group_ids=entry.get("sub_type_reason", []),
-                    sub_type=entry.get("sub_type", ""),
-                    start_date=entry.get("start_date", ""),
-                    end_date=entry.get("end_date", ""),
-                    type=entry.get("type", ""),
-                    voluntarily=entry.get("voluntarily"),
-                )
+                hn_str = str(house_num)
+                built = _build_house_entry(hn_str, entry)
+                if built is not None:
+                    houses[hn_str] = built
         elif isinstance(raw_data, dict):
             for house_num, entry in raw_data.items():
-                if not isinstance(entry, dict):
-                    continue
-                houses[house_num] = HouseEntry(
-                    house_number=house_num,
-                    group_ids=entry.get("sub_type_reason", []),
-                    sub_type=entry.get("sub_type", ""),
-                    start_date=entry.get("start_date", ""),
-                    end_date=entry.get("end_date", ""),
-                    type=entry.get("type", ""),
-                    voluntarily=entry.get("voluntarily"),
-                )
+                hn_str = str(house_num)
+                built = _build_house_entry(hn_str, entry)
+                if built is not None:
+                    houses[hn_str] = built
         else:
             _LOGGER.warning("getHomeNum: unexpected 'data' type: %s", type(raw_data))
 
         result = dict(data)
         result["houses"] = houses
 
-        # Parse preset and fact if present in the raw dict.
         if "preset" in data and isinstance(data["preset"], dict):
             result["preset"] = PresetSchedule.model_validate(data["preset"])
         if "fact" in data and isinstance(data["fact"], dict):
@@ -452,9 +451,24 @@ class HomeNumResponse(_FrozenModel):
 
         return result
 
+    def find_house(self, house_number: str) -> HouseEntry | None:
+        """Find a house entry by number, tolerating case, spaces, and Latin lookalikes.
+
+        An exact key match always takes priority.
+        """
+        if (exact := self.houses.get(house_number)) is not None:
+            return exact
+        wanted = normalize_house_key(house_number)
+        if not wanted:
+            return None
+        matches = [
+            entry for key, entry in self.houses.items() if normalize_house_key(key) == wanted
+        ]
+        return matches[0] if matches else None
+
     def get_group_for_house(self, house_number: str) -> str | None:
         """Return the primary group_id for a house number, or None."""
-        entry = self.houses.get(house_number)
+        entry = self.find_house(house_number)
         if entry is None:
             return None
         return entry.primary_group
@@ -465,14 +479,8 @@ class HomeNumResponse(_FrozenModel):
         return sorted(self.houses.keys())
 
 
-# ── Street suggestion ─────────────────────────────────────────────────────────
-
-
 class StreetSuggestion(_FrozenModel):
-    """One street returned by the ``getStreets`` AJAX call.
-
-    The DTEK site returns a plain list of street name strings.
-    """
+    """One street returned by the ``getStreets`` AJAX call."""
 
     name: str
 
@@ -480,14 +488,8 @@ class StreetSuggestion(_FrozenModel):
         return self.name
 
 
-# ── Address lookup result ─────────────────────────────────────────────────────
-
-
 class AddressResult(_FrozenModel):
-    """Result of a full address lookup (site → city → street → house → group).
-
-    This is the high-level return value of ``DtekClient.get_group_by_address()``.
-    """
+    """Result of a full address lookup (site -> city -> street -> house -> group)."""
 
     site_key: str
     city: str
@@ -498,4 +500,4 @@ class AddressResult(_FrozenModel):
 
     def __str__(self) -> str:
         label = self.group_display_name or self.group_id
-        return f"{self.city}, {self.street}, {self.house_number} → {label}"
+        return f"{self.city}, {self.street}, {self.house_number} -> {label}"
