@@ -15,7 +15,7 @@ Supported site_keys (DTEK regional sites):
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .client import DtekClient
+from .client import DtekClient, extract_csrf_token, mask_csrf_token
 from .exceptions import (
     DtekAPIError,
     DtekBlockedError,
@@ -52,6 +52,8 @@ except PackageNotFoundError:
 __all__ = [
     "DtekClient",
     "StubDtekClient",
+    "extract_csrf_token",
+    "mask_csrf_token",
     "AddressResult",
     "FactDaySchedule",
     "FactSchedule",
