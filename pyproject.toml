@@ -78,10 +78,6 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = "curl_cffi.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = "playwright.*"
 ignore_missing_imports = true
 
