@@ -1,30 +1,13 @@
-"""Stub (hardcoded) implementation of DtekClient.
-
-PURPOSE
--------
-Teammates working on the Home Assistant integration can start coding
-*immediately* without waiting for the real DTEK site to respond.
-
-HOW TO USE
-----------
-Swap one import line in your HA code::
-
-    # Production:
-    # from dtek_client import DtekClient
-
-    # During development:
-    from dtek_client.stub_client import StubDtekClient as DtekClient
-
-The interface is 100% identical.  When the real client is ready,
-revert that one import — nothing else changes.
-"""
+"""Stub (hardcoded) implementation of DtekClient for offline development."""
 
 from __future__ import annotations
 
 import datetime
 from types import TracebackType
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from .const import DEFAULT_TIMEZONE, DTEK_SITES
 from .models import (
     AddressResult,
     FactSchedule,
@@ -39,19 +22,14 @@ from .models import (
 
 __all__ = ["StubDtekClient"]
 
-# ── Hardcoded time-zone labels ────────────────────────────────────────────────
-
 _TIME_ZONE: dict[str, str] = {
     str(i): (
         f"{((i - 1) * 30) // 60:02d}:{((i - 1) * 30) % 60:02d}"
-        f"–{(i * 30) // 60:02d}:{(i * 30) % 60:02d}"
+        f"-{(i * 30) // 60:02d}:{(i * 30) % 60:02d}"
     )
     for i in range(1, 49)
 }
-# Slot 48 ends at 24:00, not 00:00.
-_TIME_ZONE["48"] = "23:30–24:00"
-
-# ── Outage patterns for preset data ──────────────────────────────────────────
+_TIME_ZONE["48"] = "23:30-24:00"
 
 _OUTAGE_PATTERN_1 = {str(i) for i in range(1, 9)} | {str(i) for i in range(37, 45)}
 _OUTAGE_PATTERN_2 = {str(i) for i in range(9, 17)} | {str(i) for i in range(25, 33)}
@@ -75,7 +53,6 @@ def _make_preset() -> PresetSchedule:
     groups: dict[str, GroupWeekSchedule] = {}
     for group_id, pattern in _PATTERNS.items():
         days = {d: _make_week_day(pattern) for d in range(1, 8)}
-        # Use model_construct to bypass model_validator (expects raw AJAX dict).
         groups[group_id] = GroupWeekSchedule.model_construct(group_id=group_id, days=days)
 
     return PresetSchedule.model_construct(
@@ -99,22 +76,33 @@ def _make_preset() -> PresetSchedule:
     )
 
 
-def _make_fact(today_ts: int, group_id: str, outage_slots: set[str]) -> FactSchedule:
-    """Build a FactSchedule stub for today AND tomorrow (mirrors real server behaviour)."""
-    slots = {k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES) for k in _TIME_ZONE}
-    tomorrow_ts = today_ts + 86400
-    # Use model_construct to bypass model_validator (expects raw AJAX dict).
+def _kyiv_midnight_ts(target_date: datetime.date) -> int:
+    """Return the Unix timestamp for midnight in Europe/Kyiv on target_date."""
+    tz = ZoneInfo(DEFAULT_TIMEZONE)
+    dt = datetime.datetime(target_date.year, target_date.month, target_date.day, tzinfo=tz)
+    return int(dt.timestamp())
+
+
+def _make_fact(today_date: datetime.date) -> FactSchedule:
+    """Build a FactSchedule stub for today and tomorrow across all stub groups."""
+    today_ts = _kyiv_midnight_ts(today_date)
+    tomorrow_ts = _kyiv_midnight_ts(today_date + datetime.timedelta(days=1))
+
+    day_groups: dict[str, dict[str, SlotStatus]] = {}
+    for group_id, pattern in _PATTERNS.items():
+        day_groups[group_id] = {
+            k: (SlotStatus.NO if k in pattern else SlotStatus.YES) for k in _TIME_ZONE
+        }
+
     return FactSchedule.model_construct(
         today_ts=today_ts,
         update="Stub data",
         days={
-            str(today_ts): {group_id: slots},
-            str(tomorrow_ts): {group_id: slots},  # tomorrow — same pattern as stub
+            str(today_ts): {gid: dict(slots) for gid, slots in day_groups.items()},
+            str(tomorrow_ts): {gid: dict(slots) for gid, slots in day_groups.items()},
         },
     )
 
-
-# ── Hardcoded address data ────────────────────────────────────────────────────
 
 _STREETS: dict[str, dict[str, list[str]]] = {
     "м. Українка": {
@@ -151,9 +139,8 @@ _HOUSE_GROUPS: dict[str, str] = {
 
 def _make_home_num_response(city: str, street: str) -> HomeNumResponse:
     """Build a complete HomeNumResponse stub for a given city and street."""
-    import time as _time
-
-    today_ts = int(_time.time()) // 86400 * 86400  # midnight UTC approximation
+    tz = ZoneInfo(DEFAULT_TIMEZONE)
+    today_date = datetime.datetime.now(tz=tz).date()
 
     streets_map = _STREETS.get(city, {})
     house_list = streets_map.get(street, ["1", "2", "3", "5", "7"])
@@ -171,15 +158,14 @@ def _make_home_num_response(city: str, street: str) -> HomeNumResponse:
         )
 
     preset = _make_preset()
-    fact = _make_fact(today_ts, "GPV3.1", _OUTAGE_PATTERN_1)
+    fact = _make_fact(today_date)
 
-    # Use model_construct to bypass HomeNumResponse.model_validator
-    # (which expects a raw AJAX dict, not pre-built model objects).
     return HomeNumResponse.model_construct(
         houses=houses,
         preset=preset,
         fact=fact,
         show_cur_schedule=True,
+        show_cur_outage_param=True,
         show_table_plan=True,
         show_table_fact=True,
         show_table_schedule=True,
@@ -187,24 +173,17 @@ def _make_home_num_response(city: str, street: str) -> HomeNumResponse:
     )
 
 
-# ── StubDtekClient ────────────────────────────────────────────────────────────
-
-
 class StubDtekClient:
-    """Drop-in replacement for :class:`~dtek_client.DtekClient`.
-
-    Returns hardcoded but realistic data — no network calls, no site scraping.
-    The async interface is 100% identical to DtekClient — swap one import line.
-    """
+    """Drop-in offline replacement for DtekClient."""
 
     def __init__(self, site_key: str = "kem", **kwargs: Any) -> None:
         self._site_key = site_key
 
     async def connect(self) -> None:
-        """No-op — stub requires no network connection."""
+        """No-op because the stub requires no network connection."""
 
     async def close(self) -> None:
-        """No-op — stub has no resources to release."""
+        """No-op because the stub holds no network resources."""
 
     async def __aenter__(self) -> StubDtekClient:
         return self
@@ -217,18 +196,20 @@ class StubDtekClient:
     ) -> None:
         pass
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    async def get_all_streets(self) -> dict[str, list[str]]:
+        """Return all hardcoded settlements and their street names."""
+        return {city: sorted(streets.keys()) for city, streets in _STREETS.items()}
 
     async def get_streets(
         self,
-        city: str,
-        *,
-        update_fact: str | None = None,
+        city: str | None = None,
     ) -> list[StreetSuggestion]:
         """Return hardcoded streets for the given city."""
+        if city is None:
+            all_names = sorted({s for streets in _STREETS.values() for s in streets})
+            return [StreetSuggestion(name=s) for s in all_names]
         streets = _STREETS.get(city, {})
         if not streets:
-            # Return a generic fallback for unknown cities.
             return [StreetSuggestion(name="вул. Центральна")]
         return [StreetSuggestion(name=s) for s in sorted(streets.keys())]
 
@@ -239,7 +220,7 @@ class StubDtekClient:
         *,
         update_fact: str | None = None,
     ) -> HomeNumResponse:
-        """Return hardcoded house numbers and schedule for the given city/street."""
+        """Return hardcoded house numbers and schedule for the given city and street."""
         return _make_home_num_response(city, street)
 
     async def get_group_by_address(
@@ -249,12 +230,13 @@ class StubDtekClient:
         house_number: str,
         *,
         update_fact: str | None = None,
+        response: HomeNumResponse | None = None,
     ) -> AddressResult:
         """Return the hardcoded disconnection group for a given address."""
-        response = _make_home_num_response(city, street)
-        entry = response.houses.get(house_number)
+        resolved = response or _make_home_num_response(city, street)
+        entry = resolved.find_house(house_number)
         group_id = (entry.primary_group if entry else None) or "GPV3.1"
-        group_name = response.preset.sch_names.get(group_id, "") if response.preset else ""
+        group_name = resolved.preset.sch_names.get(group_id, "") if resolved.preset else ""
         return AddressResult(
             site_key=self._site_key,
             city=city,
@@ -271,13 +253,14 @@ class StubDtekClient:
         house_number: str,
         *,
         update_fact: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Return today's slot map for one address — always returns data in the stub."""
-        response = _make_home_num_response(city, street)
-        entry = response.houses.get(house_number)
-        if not entry or not entry.primary_group or not response.fact:
+        response: HomeNumResponse | None = None,
+    ) -> dict[str, SlotStatus] | None:
+        """Return today's slot map for one address."""
+        resolved = response or _make_home_num_response(city, street)
+        entry = resolved.find_house(house_number)
+        if not entry or not entry.primary_group or not resolved.fact:
             return None
-        return response.fact.get_group_today(entry.primary_group)
+        return resolved.fact.get_group_today(entry.primary_group)
 
     async def get_tomorrow_schedule(
         self,
@@ -286,14 +269,15 @@ class StubDtekClient:
         house_number: str,
         *,
         update_fact: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Return tomorrow's slot map for one address — always returns data in the stub."""
-        response = _make_home_num_response(city, street)
-        entry = response.houses.get(house_number)
-        if not entry or not entry.primary_group or not response.fact:
+        response: HomeNumResponse | None = None,
+    ) -> dict[str, SlotStatus] | None:
+        """Return tomorrow's slot map for one address."""
+        resolved = response or _make_home_num_response(city, street)
+        entry = resolved.find_house(house_number)
+        if not entry or not entry.primary_group or not resolved.fact:
             return None
-        tomorrow_ts = response.fact.today_ts + 86400
-        return response.fact.get_group_day(tomorrow_ts, entry.primary_group)
+        tomorrow_date = resolved.fact.today_date + datetime.timedelta(days=1)
+        return resolved.fact.get_group_for_date(tomorrow_date, entry.primary_group)
 
     async def get_schedule_for_date(
         self,
@@ -303,34 +287,30 @@ class StubDtekClient:
         date: datetime.date,
         *,
         update_fact: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Return the slot map for a specific date — stub returns data for today/tomorrow only."""
-        response = _make_home_num_response(city, street)
-        entry = response.houses.get(house_number)
-        if not entry or not entry.primary_group or not response.fact:
+        response: HomeNumResponse | None = None,
+    ) -> dict[str, SlotStatus] | None:
+        """Return the slot map for a specific calendar date."""
+        resolved = response or _make_home_num_response(city, street)
+        entry = resolved.find_house(house_number)
+        if not entry or not entry.primary_group or not resolved.fact:
             return None
-        today_ts = response.fact.today_ts
-        today_date = datetime.datetime.fromtimestamp(today_ts, tz=datetime.UTC).date()
-        delta_days = (date - today_date).days
-        target_ts = today_ts + delta_days * 86400
-        return response.fact.get_group_day(target_ts, entry.primary_group)
+        return resolved.fact.get_group_for_date(date, entry.primary_group)
 
     @staticmethod
     def get_available_fact_dates(response: Any) -> list[datetime.date]:
         """Return all calendar dates available in a HomeNumResponse.fact."""
         if response.fact is None:
             return []
+        tz = ZoneInfo(DEFAULT_TIMEZONE)
         dates: list[datetime.date] = []
         for ts_str in response.fact.days:
             try:
                 ts = int(ts_str)
-                d = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC).date()
+                d = datetime.datetime.fromtimestamp(ts, tz=tz).date()
                 dates.append(d)
             except (ValueError, OSError):
                 continue
         return sorted(dates)
-
-    # ── Properties ────────────────────────────────────────────────────────────
 
     @property
     def site_key(self) -> str:
@@ -340,11 +320,9 @@ class StubDtekClient:
     @property
     def base_url(self) -> str:
         """Base URL for the configured region (from DTEK_SITES)."""
-        from .const import DTEK_SITES
-
         return DTEK_SITES.get(self._site_key, ("https://stub.example.com", ""))[0]
 
     @property
     def ajax_url(self) -> str | None:
-        """Always None — the stub does not use an AJAX endpoint."""
+        """Always None because the stub does not use an AJAX endpoint."""
         return None

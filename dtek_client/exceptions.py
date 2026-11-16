@@ -4,7 +4,8 @@ Hierarchy:
     DtekClientError                  (base)
     ├── DtekConnectionError          (network / connectivity issues)
     │   ├── DtekTimeoutError         (request timed out)
-    │   └── DtekSSLError             (TLS/SSL handshake failure)
+    │   ├── DtekSSLError             (TLS/SSL handshake failure)
+    │   └── DtekBlockedError         (WAF / anti-bot challenge page)
     ├── DtekAPIError                 (server returned an error response)
     │   ├── DtekUnauthorizedError    (401)
     │   ├── DtekNotFoundError        (404)
@@ -18,7 +19,7 @@ from __future__ import annotations
 
 
 class DtekClientError(Exception):
-    """Base exception for all ДТЕК client errors."""
+    """Base exception for all DTEK client errors."""
 
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -28,26 +29,24 @@ class DtekClientError(Exception):
         return f"{self.__class__.__name__}(message={str(self)!r}, status_code={self.status_code!r})"
 
 
-# ── Network / Connectivity ────────────────────────────────────────────────────
-
-
 class DtekConnectionError(DtekClientError):
-    """Raised when a network-level error prevents reaching the ДТЕК site."""
+    """Raised when a network-level error prevents reaching the DTEK site."""
 
 
 class DtekTimeoutError(DtekConnectionError):
     """Raised when the request exceeds the configured timeout."""
 
     def __init__(self, timeout: float) -> None:
-        super().__init__(f"ДТЕК request timed out after {timeout:.1f}s")
+        super().__init__(f"DTEK request timed out after {timeout:.1f}s")
         self.timeout = timeout
 
 
 class DtekSSLError(DtekConnectionError):
-    """Raised when the TLS/SSL handshake with the ДТЕК site fails."""
+    """Raised when the TLS/SSL handshake with the DTEK site fails."""
 
 
-# ── API / HTTP ────────────────────────────────────────────────────────────────
+class DtekBlockedError(DtekConnectionError):
+    """Raised when the DTEK site returns an anti-bot WAF challenge instead of data."""
 
 
 class DtekAPIError(DtekClientError):
@@ -58,11 +57,11 @@ class DtekUnauthorizedError(DtekAPIError):
     """Raised on HTTP 401."""
 
     def __init__(self) -> None:
-        super().__init__("Unauthorized: ДТЕК site rejected the request.", status_code=401)
+        super().__init__("Unauthorized: DTEK site rejected the request.", status_code=401)
 
 
 class DtekNotFoundError(DtekAPIError):
-    """Raised on HTTP 404 – page or resource not found."""
+    """Raised on HTTP 404 when a page, street, or house is not found."""
 
     def __init__(self, path: str) -> None:
         super().__init__(f"Not found: {path}", status_code=404)
@@ -70,11 +69,7 @@ class DtekNotFoundError(DtekAPIError):
 
 
 class DtekRateLimitError(DtekAPIError):
-    """Raised on HTTP 429 – too many requests.
-
-    Args:
-        retry_after: seconds to wait (from Retry-After header), or None.
-    """
+    """Raised on HTTP 429 when rate limits are exceeded."""
 
     def __init__(self, retry_after: float | None = None) -> None:
         msg = "Rate limit exceeded."
@@ -85,13 +80,10 @@ class DtekRateLimitError(DtekAPIError):
 
 
 class DtekServerError(DtekAPIError):
-    """Raised on HTTP 5xx – server-side fault."""
+    """Raised on HTTP 5xx server-side fault."""
 
     def __init__(self, status_code: int) -> None:
-        super().__init__(f"ДТЕК server error (HTTP {status_code}).", status_code=status_code)
-
-
-# ── Data / Parsing ────────────────────────────────────────────────────────────
+        super().__init__(f"DTEK server error (HTTP {status_code}).", status_code=status_code)
 
 
 class DtekDataError(DtekClientError):
@@ -102,9 +94,5 @@ class DtekDataError(DtekClientError):
         self.raw = raw
 
 
-# ── Site Configuration ────────────────────────────────────────────────────────
-
-
 class DtekSiteError(DtekClientError):
-    """Raised when the ajaxUrl cannot be discovered from the site page,
-    or when an unknown site_key is provided."""
+    """Raised when an unknown site_key is provided or site configuration fails."""
