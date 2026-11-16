@@ -184,6 +184,7 @@ class DtekClient:
         self._csrf_is_raw: bool = False
         self._csrf_lock = asyncio.Lock()
         self._global_schedule: dict[str, Any] | None = None
+        self._streets_cache: dict[str, Any] | None = None
 
     def _get_active_session(self) -> aiohttp.ClientSession:
         """Return an open session, recreating it via session_factory if closed."""
@@ -519,15 +520,24 @@ class DtekClient:
             form[f"data[{idx}][value]"] = update_fact
         return form
 
-    async def get_all_streets(self) -> dict[str, list[str]]:
+    async def _fetch_streets_raw(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Fetch and cache the raw getStreets payload on this client instance."""
+        if refresh or self._streets_cache is None:
+            raw = await self._post({"method": METHOD_GET_STREETS})
+            if not isinstance(raw, dict):
+                raise DtekDataError("getStreets: expected dict response.", raw=raw)
+            self._streets_cache = raw
+        return self._streets_cache
+
+    async def get_all_streets(self, *, refresh: bool = False) -> dict[str, list[str]]:
         """Return the complete settlement-to-streets dictionary for this DTEK site.
 
         On ``kem`` (Kyiv city), the server returns a flat list of streets; this
-        method normalizes it under the ``"м. Київ"`` settlement key.
+        method normalizes it under the ``"м. Київ"`` settlement key. The regional
+        street directory (~470 KB) is cached on the client instance unless
+        ``refresh=True`` is passed.
         """
-        raw = await self._post({"method": METHOD_GET_STREETS})
-        if not isinstance(raw, dict):
-            raise DtekDataError("getStreets: expected dict response.", raw=raw)
+        raw = await self._fetch_streets_raw(refresh=refresh)
 
         streets_raw = raw.get("streets", raw.get("data", {}))
         if isinstance(streets_raw, list):
@@ -545,18 +555,17 @@ class DtekClient:
     async def get_streets(
         self,
         city: str | None = None,
+        *,
+        refresh: bool = False,
     ) -> list[StreetSuggestion]:
         """Return streets available in ``city`` on this DTEK site.
 
         Args:
             city: Settlement name as it appears on the site (e.g. ``"м. Українка"``).
                   Optional on ``kem`` (Kyiv city) where the site returns a flat list.
+            refresh: Bypass the instance street cache and fetch fresh data.
         """
-        raw = await self._post({"method": METHOD_GET_STREETS})
-
-        if not isinstance(raw, dict):
-            raise DtekDataError("getStreets: expected dict response.", raw=raw)
-
+        raw = await self._fetch_streets_raw(refresh=refresh)
         streets_raw = raw.get("streets", raw.get("data", {}))
 
         if isinstance(streets_raw, list):
@@ -623,7 +632,16 @@ class DtekClient:
         if not isinstance(raw, dict):
             raise DtekDataError("getHomeNum: expected dict response.", raw=raw)
 
-        if "preset" not in raw and "fact" not in raw:
+        if "preset" in raw or "fact" in raw:
+            # Keep the cached global schedule synchronized whenever fresh schedule
+            # blocks arrive so subsequent delta responses never fall back to stale data.
+            updated_cache = dict(self._global_schedule) if self._global_schedule else {}
+            if "preset" in raw:
+                updated_cache["preset"] = raw["preset"]
+            if "fact" in raw:
+                updated_cache["fact"] = raw["fact"]
+            self._global_schedule = updated_cache
+        else:
             if self._global_schedule is None:
                 try:
                     global_raw = await self._post(
@@ -638,6 +656,7 @@ class DtekClient:
                     self._global_schedule = {}
 
             if self._global_schedule:
+                raw = dict(raw)
                 if "preset" in self._global_schedule:
                     raw["preset"] = self._global_schedule["preset"]
                 if "fact" in self._global_schedule:

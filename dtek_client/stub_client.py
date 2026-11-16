@@ -22,30 +22,52 @@ from .models import (
 
 __all__ = ["StubDtekClient"]
 
-_TIME_ZONE: dict[str, str] = {
-    str(i): (
-        f"{((i - 1) * 30) // 60:02d}:{((i - 1) * 30) % 60:02d}"
-        f"-{(i * 30) // 60:02d}:{(i * 30) % 60:02d}"
-    )
-    for i in range(1, 49)
+# Live DTEK sites expose 24 one-hour intervals ("00-01" .. "23-24") and encode
+# 30-minute transitions using SlotStatus.FIRST and SlotStatus.SECOND.
+_TIME_ZONE: dict[str, str] = {str(i): f"{i - 1:02d}-{i:02d}" for i in range(1, 25)}
+
+_PATTERNS: dict[str, dict[str, SlotStatus]] = {
+    "GPV3.1": {
+        "1": SlotStatus.NO,
+        "2": SlotStatus.NO,
+        "3": SlotStatus.NO,
+        "4": SlotStatus.FIRST,
+        "18": SlotStatus.SECOND,
+        "19": SlotStatus.NO,
+        "20": SlotStatus.NO,
+        "21": SlotStatus.NO,
+    },
+    "GPV3.2": {
+        "5": SlotStatus.NO,
+        "6": SlotStatus.NO,
+        "7": SlotStatus.NO,
+        "8": SlotStatus.NO,
+        "12": SlotStatus.SECOND,
+        "13": SlotStatus.NO,
+        "14": SlotStatus.NO,
+        "15": SlotStatus.NO,
+    },
+    "GPV4.1": {
+        "9": SlotStatus.NO,
+        "10": SlotStatus.NO,
+        "11": SlotStatus.NO,
+        "12": SlotStatus.FIRST,
+        "21": SlotStatus.NO,
+        "22": SlotStatus.NO,
+        "23": SlotStatus.NO,
+        "24": SlotStatus.NO,
+    },
 }
-_TIME_ZONE["48"] = "23:30-24:00"
-
-_OUTAGE_PATTERN_1 = {str(i) for i in range(1, 9)} | {str(i) for i in range(37, 45)}
-_OUTAGE_PATTERN_2 = {str(i) for i in range(9, 17)} | {str(i) for i in range(25, 33)}
-_OUTAGE_PATTERN_3 = {str(i) for i in range(17, 25)} | {str(i) for i in range(41, 49)}
-
-_PATTERNS: dict[str, set[str]] = {
-    "GPV3.1": _OUTAGE_PATTERN_1,
-    "GPV3.2": _OUTAGE_PATTERN_2,
-    "GPV4.1": _OUTAGE_PATTERN_3,
-}
 
 
-def _make_week_day(outage_slots: set[str]) -> WeekDaySchedule:
-    """Build a WeekDaySchedule from a set of outage slot keys."""
-    slots = {k: (SlotStatus.NO if k in outage_slots else SlotStatus.YES) for k in _TIME_ZONE}
-    return WeekDaySchedule(slots=slots)
+def _build_day_slots(pattern: dict[str, SlotStatus]) -> dict[str, SlotStatus]:
+    """Build a 24-slot hourly schedule map from an outage pattern."""
+    return {k: pattern.get(k, SlotStatus.YES) for k in _TIME_ZONE}
+
+
+def _make_week_day(pattern: dict[str, SlotStatus]) -> WeekDaySchedule:
+    """Build a WeekDaySchedule from an outage slot pattern."""
+    return WeekDaySchedule(slots=_build_day_slots(pattern))
 
 
 def _make_preset() -> PresetSchedule:
@@ -88,11 +110,9 @@ def _make_fact(today_date: datetime.date) -> FactSchedule:
     today_ts = _kyiv_midnight_ts(today_date)
     tomorrow_ts = _kyiv_midnight_ts(today_date + datetime.timedelta(days=1))
 
-    day_groups: dict[str, dict[str, SlotStatus]] = {}
-    for group_id, pattern in _PATTERNS.items():
-        day_groups[group_id] = {
-            k: (SlotStatus.NO if k in pattern else SlotStatus.YES) for k in _TIME_ZONE
-        }
+    day_groups: dict[str, dict[str, SlotStatus]] = {
+        group_id: _build_day_slots(pattern) for group_id, pattern in _PATTERNS.items()
+    }
 
     return FactSchedule.model_construct(
         today_ts=today_ts,
@@ -196,13 +216,15 @@ class StubDtekClient:
     ) -> None:
         pass
 
-    async def get_all_streets(self) -> dict[str, list[str]]:
+    async def get_all_streets(self, *, refresh: bool = False) -> dict[str, list[str]]:
         """Return all hardcoded settlements and their street names."""
         return {city: sorted(streets.keys()) for city, streets in _STREETS.items()}
 
     async def get_streets(
         self,
         city: str | None = None,
+        *,
+        refresh: bool = False,
     ) -> list[StreetSuggestion]:
         """Return hardcoded streets for the given city."""
         if city is None:

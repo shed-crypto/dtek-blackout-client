@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from playwright.async_api import Error as PlaywrightError
 
-from dtek_client.browser_auth import get_cleared_cookies
-from dtek_client.exceptions import DtekConnectionError
+pytest.importorskip("playwright")
+pytest.importorskip("playwright_stealth")
+
+from playwright.async_api import Error as PlaywrightError  # noqa: E402
+
+from dtek_client.browser_auth import get_cleared_cookies  # noqa: E402
+from dtek_client.exceptions import DtekConnectionError  # noqa: E402
 
 
 def _make_playwright_stack(
@@ -171,3 +178,25 @@ class TestPlaywrightInteractions:
                 await get_cleared_cookies("https://example.com")
 
         browser.close.assert_awaited_once()
+
+
+class TestOptionalDependencyGuard:
+    async def test_module_imports_and_raises_install_hint_when_playwright_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "playwright", None)
+        monkeypatch.setitem(sys.modules, "playwright.async_api", None)
+        monkeypatch.setitem(sys.modules, "playwright_stealth", None)
+
+        module_path = Path(__file__).resolve().parents[1] / "dtek_client" / "browser_auth.py"
+        spec = importlib.util.spec_from_file_location(
+            "dtek_client._browser_auth_no_pw", module_path
+        )
+        assert spec is not None and spec.loader is not None
+        isolated_mod = importlib.util.module_from_spec(spec)
+        isolated_mod.__package__ = "dtek_client"
+        spec.loader.exec_module(isolated_mod)
+
+        assert isolated_mod.async_playwright is None
+        with pytest.raises(ImportError, match=r"dtek-blackout-client\[browser\]"):
+            await isolated_mod.get_cleared_cookies("https://example.com")

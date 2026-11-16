@@ -162,8 +162,8 @@ asyncio.run(main())
 
 | Method | Returns | Description |
 |---|---|---|
-| `get_all_streets()` | `dict[str, list[str]]` | Complete settlement-to-streets dictionary for the region |
-| `get_streets(city=None)` | `list[StreetSuggestion]` | Streets in a city (or all streets when `city=None` / on `kem`) |
+| `get_all_streets(*, refresh=False)` | `dict[str, list[str]]` | Complete settlement-to-streets dictionary for the region (cached on client) |
+| `get_streets(city=None, *, refresh=False)` | `list[StreetSuggestion]` | Streets in a city (or all streets when `city=None` / on `kem`, cached) |
 | `get_home_num(city, street)` | `HomeNumResponse` | All houses, groups, and schedules for a street |
 | `get_group_by_address(city, street, house_number, *, response=None)` | `AddressResult` | Disconnection group for a specific address |
 | `get_today_schedule(city, street, house_number, *, response=None)` | `dict[str, SlotStatus] \| None` | Today's slot map for one address |
