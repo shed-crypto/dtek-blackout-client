@@ -42,7 +42,7 @@ Region names are also available programmatically via `const.REGION_NAMES`,
 - **Automatic Yii2 CSRF bootstrap** — extracts `_csrf-dtek-*` cookies from `/ua/ajax`, masks tokens per Yii2 `Security::maskToken`, and refreshes expired tokens on HTTP 400 without needing a headless browser
 - **Typed** — every model uses `pydantic` v2 with strict validation and `frozen=True`
 - **DST-safe timezone handling** — resolves schedule dates in `Europe/Kyiv` via `zoneinfo` + `tzdata`, accurately handling 23-hour and 25-hour daylight saving transitions
-- **Tolerant house matching** — matches building numbers across Cyrillic/Latin lookalike characters and spacing variations (e.g. `8a` -> `8а`)
+- **Tolerant house matching** — matches building numbers across Cyrillic/Latin lookalike characters and spacing variations (e.g. `8 a` -> `8а`, Latin to Cyrillic)
 - **Resilient** — automatic retry with linear back-off on 5xx errors
 - **Stub included** — `StubDtekClient` enables offline development without network access
 - **Tested** — 99%+ test coverage with all HTTP calls mocked in CI
@@ -211,7 +211,7 @@ In `manifest.json`:
 {
   "domain": "dtek_outage",
   "name": "DTEK Outage Schedule",
-  "requirements": ["dtek-blackout-client==0.2.0"],
+  "requirements": ["dtek-blackout-client==0.2.1"],
   "dependencies": []
 }
 ```
