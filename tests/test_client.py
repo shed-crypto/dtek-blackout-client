@@ -623,8 +623,37 @@ class TestGetStreets:
         client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
             return_value={"result": True, "streets": {"м. Ірпінь": ["вул. Соборна"]}}
         )
-        region_map = await client_with_ajax.get_all_streets()
+        region_map = await client_with_ajax.get_all_streets(refresh=True)
         assert region_map == {"м. Ірпінь": ["вул. Соборна"]}
+
+    async def test_get_all_streets_and_get_streets_reuse_cached_directory(
+        self, client_with_ajax: DtekClient, streets_raw: dict[str, Any]
+    ) -> None:
+        mock_post = AsyncMock(return_value=streets_raw)
+        client_with_ajax._post = mock_post  # type: ignore[method-assign]
+
+        all_map = await client_with_ajax.get_all_streets()
+        city_streets = await client_with_ajax.get_streets("м. Українка")
+
+        assert "м. Українка" in all_map
+        assert len(city_streets) > 0
+        assert mock_post.await_count == 1
+
+        await client_with_ajax.get_streets("м. Українка", refresh=True)
+        assert mock_post.await_count == 2
+
+    async def test_get_streets_error_is_not_cached(self, client_with_ajax: DtekClient) -> None:
+        client_with_ajax._post = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                DtekServerError(503),
+                {"streets": {"м. Українка": ["вул. Юності"]}},
+            ]
+        )
+        with pytest.raises(DtekServerError):
+            await client_with_ajax.get_all_streets()
+
+        streets = await client_with_ajax.get_streets("м. Українка")
+        assert [s.name for s in streets] == ["вул. Юності"]
 
     async def test_get_all_streets_raises_on_non_dict(self, client_with_ajax: DtekClient) -> None:
         client_with_ajax._post = AsyncMock(return_value="invalid")  # type: ignore[method-assign]
@@ -760,6 +789,50 @@ class TestGetHomeNumGlobalScheduleFallback:
         result = await client_with_ajax.get_home_num("м. Українка", "вул. Юності")
         assert isinstance(result, HomeNumResponse)
         assert result.preset is None
+
+    async def test_global_schedule_refreshes_when_newer_schedule_arrives(
+        self, client_with_ajax: DtekClient, home_num_raw: dict[str, Any]
+    ) -> None:
+        v1 = copy.deepcopy(home_num_raw)
+        v1["fact"]["update"] = "16.11.2026 10:00"
+
+        v2 = copy.deepcopy(home_num_raw)
+        v2["fact"]["update"] = "16.11.2026 18:00"
+
+        mock_post = AsyncMock(
+            side_effect=[
+                v1,
+                self._raw_without_schedule(),
+                v2,
+                self._raw_without_schedule(),
+            ]
+        )
+        client_with_ajax._post = mock_post  # type: ignore[method-assign]
+
+        r1 = await client_with_ajax.get_home_num(
+            "м. Українка", "вул. Юності", update_fact="01.01.2000 00:00"
+        )
+        assert r1.fact is not None
+        assert r1.fact.update == "16.11.2026 10:00"
+
+        r1_delta = await client_with_ajax.get_home_num(
+            "м. Українка", "вул. Юності", update_fact="16.11.2026 10:00"
+        )
+        assert r1_delta.fact is not None
+        assert r1_delta.fact.update == "16.11.2026 10:00"
+
+        r2 = await client_with_ajax.get_home_num(
+            "м. Українка", "вул. Юності", update_fact="16.11.2026 10:00"
+        )
+        assert r2.fact is not None
+        assert r2.fact.update == "16.11.2026 18:00"
+
+        r2_delta = await client_with_ajax.get_home_num(
+            "м. Українка", "вул. Юності", update_fact="16.11.2026 18:00"
+        )
+        assert r2_delta.fact is not None
+        assert r2_delta.fact.update == "16.11.2026 18:00"
+        assert mock_post.await_count == 4
 
     async def test_validation_error_raises_data_error(self, client_with_ajax: DtekClient) -> None:
         raw: dict[str, Any] = {
