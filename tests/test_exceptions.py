@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dtek_client.exceptions import (
     DtekAPIError,
+    DtekBlockedError,
     DtekClientError,
     DtekConnectionError,
     DtekDataError,
@@ -29,6 +30,9 @@ class TestHierarchy:
 
     def test_ssl_is_connection(self) -> None:
         assert issubclass(DtekSSLError, DtekConnectionError)
+
+    def test_blocked_is_connection(self) -> None:
+        assert issubclass(DtekBlockedError, DtekConnectionError)
 
     def test_api_is_client(self) -> None:
         assert issubclass(DtekAPIError, DtekClientError)
@@ -67,6 +71,10 @@ class TestMessages:
         e = DtekTimeoutError(15.0)
         assert "15.0" in str(e)
         assert e.timeout == 15.0
+
+    def test_blocked_error_message(self) -> None:
+        e = DtekBlockedError("Anti-bot challenge")
+        assert "Anti-bot challenge" in str(e)
 
     def test_not_found_stores_path(self) -> None:
         e = DtekNotFoundError("/schedule")

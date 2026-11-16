@@ -44,9 +44,13 @@ class TestConstructor:
         assert "dtek-kem.com.ua" in client.base_url
 
     def test_all_valid_site_keys(self) -> None:
-        for key in ("kem", "krem", "dnem", "dem", "oem", "zem"):
+        for key in ("kem", "krem", "dnem", "dem", "oem"):
             client = DtekClient(key)
             assert client.site_key == key
+
+    def test_removed_zem_site_key_raises(self) -> None:
+        with pytest.raises(DtekSiteError):
+            DtekClient("zem")
 
     def test_owns_session_true_when_no_session_injected(self) -> None:
         client = DtekClient("kem")
