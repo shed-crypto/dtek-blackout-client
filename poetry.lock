@@ -1724,4 +1724,4 @@ browser = ["playwright", "playwright-stealth"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "d204154400e3daa322838d834356c5800830bb1ef56bf32d2badab1e914c6fe0"
+content-hash = "9d8762d4f6a5ac595adcb23f4a6760a2bfc5357bd05180ee24b7028f2bab1ec1"
