@@ -1,89 +1,77 @@
-"""Playwright-based helper to bypass WAF protection on DTEK sites.
+"""Optional Playwright-based helper to clear WAF challenges on DTEK sites.
 
-Some DTEK regional sites are protected by Incapsula/Imperva WAF which issues
-a JavaScript challenge to headless HTTP clients.  This module launches a real
-Chromium browser (headless) via Playwright, waits for the WAF challenge to
-resolve, and then extracts the session cookies and CSRF token needed for
-subsequent AJAX requests.
-
-Usage::
-
-    from dtek_client.browser_auth import get_cleared_cookies
-
-    cookies, csrf_token = await get_cleared_cookies(
-        "https://www.dtek-krem.com.ua/ua/shutdowns"
-    )
+Normal AJAX requests to ``/ua/ajax`` work directly via Yii2 CSRF cookies
+without a browser. This module is provided as an optional fallback
+(``pip install dtek-blackout-client[browser]``) for environments where
+full HTML page cookies must be harvested through Chromium.
 """
 
 from __future__ import annotations
 
-import asyncio  # noqa: F401
 import logging
+from typing import Final
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
-from playwright_stealth import Stealth  # type: ignore
+from playwright_stealth import Stealth
 
 from .exceptions import DtekConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
+DEFAULT_BROWSER_USER_AGENT: Final = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+_NAVIGATION_TIMEOUT_MS: Final = 60000
+
 
 async def get_cleared_cookies(
-    url: str, show_browser: bool = False
+    url: str,
+    show_browser: bool = False,
+    *,
+    user_agent: str = DEFAULT_BROWSER_USER_AGENT,
 ) -> tuple[dict[str, str], str | None]:
-    """Launch a headless browser, wait for the WAF challenge to clear, and
-    return a tuple of ``(cookies, csrf_token)``.
+    """Launch Chromium, wait for the WAF challenge to clear, and return cookies and CSRF token.
 
     Args:
-        url: the schedule page URL (e.g. "https://www.dtek-krem.com.ua/ua/shutdowns").
-        show_browser: If True, launches non-headless browser to allow manual
-                     Cloudflare/WAF bypass.
+        url: Schedule page URL (e.g. "https://www.dtek-krem.com.ua/ua/shutdowns").
+        show_browser: Launch a visible browser window for manual verification when True.
+        user_agent: User-Agent string configured on the browser context.
+
     Returns:
-        A tuple of:
-            - ``cookies`` – dict of cookie name → value, ready to pass to curl_cffi.
-            - ``csrf_token`` – the Yii2 CSRF token from the page meta tag, or None.
+        Tuple of ``(cookies_dict, csrf_token)``.
     """
-    _LOGGER.info("Launching Playwright to bypass WAF for %s...", url)
+    _LOGGER.info("Launching Playwright to bypass WAF for %s", url)
 
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(headless=not show_browser)
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            )
-        )
+        context = await browser.new_context(user_agent=user_agent)
         page = await context.new_page()
 
-        _LOGGER.debug("Navigating to %s", url)
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        except PlaywrightError as e:
+            await page.goto(url, wait_until="domcontentloaded", timeout=_NAVIGATION_TIMEOUT_MS)
+        except PlaywrightError as exc:
             await browser.close()
-            raise DtekConnectionError(f"Failed to load page to bypass WAF: {e}") from e
+            raise DtekConnectionError(f"Failed to load page to bypass WAF: {exc}") from exc
 
-        # Handle Cloudflare / WAF verification
         if show_browser:
-            _LOGGER.info("Waiting for manual verification in the browser window...")
+            _LOGGER.info("Waiting for manual verification in the browser window")
         try:
-            # Wait for the site to actually load (indicated by the CSRF token meta tag)
-            await page.wait_for_selector('meta[name="csrf-token"]', state="attached", timeout=60000)
-            _LOGGER.info("Page loaded successfully, challenge cleared.")
+            await page.wait_for_selector(
+                'meta[name="csrf-token"]',
+                state="attached",
+                timeout=_NAVIGATION_TIMEOUT_MS,
+            )
+            _LOGGER.info("Page loaded and WAF challenge cleared")
         except PlaywrightError:
-            _LOGGER.warning("Timeout waiting for page to load after challenge.")
+            _LOGGER.warning("Timeout waiting for csrf-token meta tag after challenge")
 
-        # Extract the Yii2 CSRF token from the page meta tag.
         try:
             csrf_token = await page.get_attribute('meta[name="csrf-token"]', "content")
         except PlaywrightError:
             csrf_token = None
-
-        if csrf_token:
-            _LOGGER.info("Successfully extracted CSRF token.")
-        else:
-            _LOGGER.warning("CSRF token not found on the page.")
 
         cookies = await context.cookies()
         await browser.close()
